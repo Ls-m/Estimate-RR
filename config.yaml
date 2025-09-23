@@ -1,0 +1,5 @@
+preprocessing:
+  bandpass_filter:
+    low_freq: 0.1  # Lower frequency for better stability
+    high_freq: 0.6   # Higher frequency, well below Nyquist
+    order: 4         # Lower order for better numerical stability
