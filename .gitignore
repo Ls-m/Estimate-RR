@@ -1,0 +1,5 @@
+/data/
+/train.log
+/outputs/
+src/__pycache__/
+.DS_Store
