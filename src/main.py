@@ -25,7 +25,8 @@ def load_subjects_bidmc(path):
     return subjects
 
 def load_files_bidmc(path,subjects):
-    raw_data = []
+    print(f"subjects are {subjects}")
+    raw_data = {}
     min_RR = float("inf")
     min_subject = []
     for subject in subjects:
@@ -56,17 +57,17 @@ def load_files_bidmc(path,subjects):
         if np.any(np.isnan(rr)) or np.any(np.isinf(rr)):
             logger.info(f"RR data contains NaN or Inf values for subject: {subject}")
 
-        subject_dict = {
-            "subject_id": subject,
-            "PPG": ppg,
-            "RR": rr
-        }
-        raw_data.append(subject_dict)
+        # subject_dict = {
+        #     "subject_id": subject,
+        #     "PPG": ppg,
+        #     "RR": rr
+        # }
+        raw_data[subject] = (ppg, rr)
 
     logger.info(f"Minimum RR subjects for bidmc dataset: {min_subject}")
     logger.info(f"Minimum RR for bidmc dataset: {min_RR}")
-    for data in raw_data:
-        logger.debug(f"for subject {data['subject_id']} PPG length: {len(data['PPG'])}, RR length: {len(data['RR'])}")
+    for subject, (ppg, rr) in raw_data.items():
+        logger.debug(f"for subject {subject} PPG length: {len(ppg)}, RR length: {len(rr)}")
 
     return raw_data
 
@@ -595,12 +596,15 @@ def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, origina
 
 def process_data(cfg, raw_data, dataset_name='bidmc'):
     # Code to process data goes here
-    processed_data = []
-    for subject_data in raw_data:
+    processed_data = {}
+    # for subject_data in raw_data:
+    for i in range(1,54):
         # Example processing: normalize PPG and RR signals
-        ppg = subject_data["PPG"]
-        rr = subject_data["RR"]
-
+        # ppg = subject_data["PPG"]
+        # rr = subject_data["RR"]
+        
+        ppg = raw_data[f"{i:02}"][0]
+        rr = raw_data[f"{i:02}"][1]
         if dataset_name == "bidmc":
             original_rate = 125
 
@@ -613,7 +617,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
             rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
         else:
-            logger.info(f"for this subject {subject_data['subject_id']} there is no noise detected!")
+            logger.info(f"for this subject {i} there is no noise detected!")
             expanded_removed_segments = []
             ppg_denoised = ppg
             rr_labels_denoised = rr
@@ -633,9 +637,9 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         ppg_normalized = normalize_signal(ppg_cliped)
         # check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
 
-
-        X, y = create_segments_with_gap_handling(
-            subject_data["subject_id"],
+        subject_id = f"{i:02}"
+        ppg_segments, rr_segments = create_segments_with_gap_handling(
+            subject_id,
             ppg_normalized,
             rr_labels_denoised,
             original_len=len(ppg),
@@ -645,13 +649,14 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             window_size_sec=32,
             step_size_sec=2
         )
-        subject_id = subject_data["subject_id"]
-        processed_data.append({
-            "subject_id": subject_id,
-            "PPG": X,
-            "RR": y
-        })
+        
+        # processed_data.append({
+        #     "subject_id": subject_id,
+        #     "PPG": X,
+        #     "RR": y
+        # })
 
+        processed_data[subject_id] = (ppg_segments, rr_segments)
         # logger.info(f"processed data is {processed_data}")
         
     return processed_data
@@ -659,9 +664,9 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
 
 def create_balanced_folds(processed_data, n_splits=5):
 
-    
-    
-    subject_segment_counts = [(item["subject_id"], len(item["PPG"])) for item in processed_data]
+
+
+    subject_segment_counts = [(subject_id, len(ppg_segments)) for subject_id, (ppg_segments, rr_segments) in processed_data.items()]
     subject_segment_counts.sort(key=lambda x: x[1], reverse=True)
     logger.info(f"Subject segment counts (sorted): {subject_segment_counts}")
     folds = [[] for _ in range(n_splits)]
@@ -687,7 +692,7 @@ def create_balanced_folds(processed_data, n_splits=5):
     logger.info(f"Validation subjects in each fold: {val_subjects}")
     logger.info(f"Train subjects in each fold: {train_subjects}")
 
-    all_subjects = set(item["subject_id"] for item in processed_data)
+    all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments) in processed_data.items())
 
     cv_splits = []
     for i in range(n_splits):
@@ -725,14 +730,14 @@ def create_data_splits(cv_split, processed_data):
     validation_subjects = cv_split["val_subjects"]
     test_subjects = cv_split["test_subjects"]
 
-    subject_ids = [item["subject_id"] for item in processed_data]
+    subject_ids = [subject_id for subject_id, (ppg_segments, rr_segments) in processed_data.items()]
 
     train_ppg_list = []
     train_rr_list = []
     for train_subject in train_subjects:
         if train_subject in subject_ids:
-            train_ppg_list.append(processed_data[train_subject]["PPG"])
-            train_rr_list.append(processed_data[train_subject]["RR"])
+            train_ppg_list.append(processed_data[train_subject][0])
+            train_rr_list.append(processed_data[train_subject][1])
         else:
             logger.warning(f"Train subject {train_subject} not found in processed data.")
     
@@ -740,8 +745,8 @@ def create_data_splits(cv_split, processed_data):
     val_rr_list = []
     for val_subject in validation_subjects:
         if val_subject in subject_ids:
-            val_ppg_list.append(processed_data[val_subject]["PPG"])
-            val_rr_list.append(processed_data[val_subject]["RR"])
+            val_ppg_list.append(processed_data[val_subject][0])
+            val_rr_list.append(processed_data[val_subject][1])
         else:
             logger.warning(f"Validation subject {val_subject} not found in processed data.")
 
@@ -749,20 +754,25 @@ def create_data_splits(cv_split, processed_data):
     test_rr_list = []
     for test_subject in test_subjects:
         if test_subject in subject_ids:
-            test_ppg_list.append(processed_data[test_subject]["PPG"])
-            test_rr_list.append(processed_data[test_subject]["RR"])
+            test_ppg_list.append(processed_data[test_subject][0])
+            test_rr_list.append(processed_data[test_subject][1])
         else:
             logger.warning(f"Test subject {test_subject} not found in processed data.")
-
-    logger.info(f"train ppg shape: {[len(x) for x in train_ppg_list]}")
+    train_ppg = np.concatenate(train_ppg_list, axis=0)
+    train_rr = np.concatenate(train_rr_list, axis=0)
+    val_ppg = np.concatenate(val_ppg_list, axis=0)
+    val_rr = np.concatenate(val_rr_list, axis=0)
+    test_ppg = np.concatenate(test_ppg_list, axis=0)
+    test_rr = np.concatenate(test_rr_list, axis=0)
+    logger.info(f"train ppg shape: {train_ppg.shape}")
 
     return {
-        'train_ppg': train_ppg_list,
-        'train_rr': train_rr_list,
-        'val_ppg': val_ppg_list,
-        'val_rr': val_rr_list,
-        'test_ppg': test_ppg_list,
-        'test_rr': test_rr_list,
+        'train_ppg': train_ppg,
+        'train_rr': train_rr,
+        'val_ppg': val_ppg,
+        'val_rr': val_rr,
+        'test_ppg': test_ppg,
+        'test_rr': test_rr,
         'train_subjects': train_subjects,
         'val_subjects': validation_subjects,
         'test_subjects': test_subjects
@@ -789,9 +799,9 @@ def main(cfg: DictConfig):
 
     count_zero = 0
     segment_counts = {}
-    for entry in processed_data:
-        subject_id = entry["subject_id"]
-        n_segments = len(entry["RR"])   # or entry["PPG"].shape[0]
+    for subject_id, (ppg_segments, rr_segments) in processed_data.items():
+        
+        n_segments = len(rr_segments)   # or entry["PPG"].shape[0]
         segment_counts[subject_id] = n_segments
         if n_segments == 0: count_zero += 1
 
