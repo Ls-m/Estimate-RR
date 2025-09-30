@@ -8,6 +8,7 @@ import logging
 import matplotlib.pyplot as plt
 from scipy.signal import welch,spectrogram, find_peaks
 from sklearn.preprocessing import StandardScaler
+from scipy.interpolate import interp1d
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -254,7 +255,7 @@ def check_normalization_effect(original_signal, normalized_signal, original_rate
     plt.show()
 
 
-def edpa_denoiser(ppg_signal, fs, bandpass_freqs = [0.5,12.0], threshold_multiplier = 1.5, window_duration_sec = 1.5):
+def edpa_denoiser(ppg_signal, fs, bandpass_freqs = [0.5,12.0], threshold_multiplier = 2, window_duration_sec = 1.5, check_effect = False):
     if ppg_signal.ndim != 1:
         raise ValueError("Input PPG signal must be a 1D array.")
     
@@ -268,9 +269,9 @@ def edpa_denoiser(ppg_signal, fs, bandpass_freqs = [0.5,12.0], threshold_multipl
     distance_in_samples = int(distance_in_seconds * fs)
 
     peaks, _ = find_peaks(filtered_signal, distance=distance_in_samples)
-    logger.info(f"Detected peaks at: {peaks}")
+    # logger.info(f"Detected peaks at: {peaks}")
     throughs, _ = find_peaks(-filtered_signal, distance=distance_in_samples)
-    logger.info(f"Detected throughs at: {throughs}")
+    # logger.info(f"Detected throughs at: {throughs}")
 
     if len(peaks) < 2 or len(throughs) < 2:
         logger.error("Insufficient peaks or troughs detected.")
@@ -292,18 +293,18 @@ def edpa_denoiser(ppg_signal, fs, bandpass_freqs = [0.5,12.0], threshold_multipl
         logger.error("No anomalous segments detected.")
         return ppg_signal, []
     
-    logger.info(f"Detected anomalous indices at: {anomalous_indices}")
+    # logger.info(f"Detected anomalous indices at: {anomalous_indices}")
 
     median_env_diff = np.median(envelope_diff)
-    logger.info(f"Median envelope difference is: {median_env_diff}")
+    # logger.info(f"Median envelope difference is: {median_env_diff}")
     anomalous_segments = []
     
     diffs = np.diff(anomalous_indices)
-    logger.info(f"Diffs are: {diffs}")
+    # logger.info(f"Diffs are: {diffs}")
     split_points = np.where(diffs > fs)[0] + 1 # Split if gap > 1 second
-    logger.info(f"Split points are: {split_points}")
+    # logger.info(f"Split points are: {split_points}")
     anomaly_groups = np.split(anomalous_indices, split_points)
-    logger.info(f"Anomaly groups are: {anomaly_groups}")
+    # logger.info(f"Anomaly groups are: {anomaly_groups}")
 
     for group in anomaly_groups:
         if len(group) == 0:
@@ -337,7 +338,8 @@ def edpa_denoiser(ppg_signal, fs, bandpass_freqs = [0.5,12.0], threshold_multipl
     for start, end in merged_segments:
         keep_mask[start:end] = False
     
-
+    if not check_effect:
+        return ppg_signal[keep_mask], merged_segments
     t = np.arange(len(ppg_signal)) / fs  
     start_sec = 0
     plot_seconds = 15
@@ -399,6 +401,196 @@ def edpa_denoiser(ppg_signal, fs, bandpass_freqs = [0.5,12.0], threshold_multipl
 
     return ppg_signal[keep_mask], merged_segments
 
+def expand_removals_to_second_blocks(removed_segments, fs):
+    if not removed_segments:
+        logger.warning("No removed segments to expand.")
+        return []
+
+    seconds_to_remove = set()
+
+    for start_idx, end_idx in removed_segments:
+        start_second = start_idx // fs
+        end_second = (end_idx - 1) // fs
+        for sec in range(start_second,end_second+1):
+            seconds_to_remove.add(sec)
+
+    if not seconds_to_remove:
+        logger.warning("No seconds to remove.")
+        return []
+    
+    expanded_segments = []
+
+    for sec in sorted(list(seconds_to_remove)):
+        expanded_segments.append((sec * fs, (sec + 1) * fs))
+
+    expanded_segments.sort()
+    merged_segments = [expanded_segments[0]]
+    for current_start, current_end in expanded_segments:
+        last_start, last_end = merged_segments[-1]
+        if current_start <= last_end:
+            merged_segments[-1] = (last_start, max(last_end, current_end))
+        else:
+            merged_segments.append((current_start, current_end))
+
+    return merged_segments
+
+def apply_removals(signal, removed_segments):
+    keep_mask = np.ones(len(signal), dtype=bool)
+    for start,end in removed_segments:
+        start = max(0, start)
+        end = min(len(signal), end)
+        if start < end:
+                keep_mask[start:end] = False
+
+    return signal[keep_mask]
+
+def remove_corresponding_labels(rr_labels, removed_ppg_segments, ppg_fs, rr_fs):
+    if not removed_ppg_segments:
+        logger.warning("No removed ppg segments")
+        return rr_labels
+    fs_ratio = ppg_fs/rr_fs
+    keep_mask = np.ones(len(rr_labels), dtype=bool)
+
+    for start_ppg, end_ppg in removed_ppg_segments:
+        start_rr = int(np.floor(start_ppg/fs_ratio))
+        end_rr = int(np.floor(end_ppg/fs_ratio))
+
+        start_rr = max(0, start_rr)
+        end_rr = min(len(rr_labels), end_rr)
+
+        if start_rr < end_rr:
+            keep_mask[start_rr:end_rr] = False
+    return rr_labels[keep_mask]
+
+def reconstruct_short_gaps(ppg_signal, segments_to_reconstruct, fs):
+
+    reconstructed_signal = ppg_signal.copy()
+
+    for start_idx, end_idx in segments_to_reconstruct:
+
+        anchor_len = int(fs * 0.5)
+
+        pre_gap_start = max(0, start_idx - anchor_len)
+        post_gap_end = min(len(ppg_signal), end_idx + anchor_len)
+
+        anchor_indices = np.concatenate([np.arange(pre_gap_start, start_idx), np.arange(end_idx, post_gap_end)])
+
+        anchor_values = reconstructed_signal[anchor_indices]
+
+        if len(anchor_indices) < 2:
+            logger.warning("anchor indices is less than 2")
+            continue
+
+        try:
+            interp_func = interp1d(anchor_indices, anchor_values, kind='cubic', bounds_error=False, fill_value="extrapolate")
+        except ValueError:
+            logger.warning("raised error in interpolation")
+            interp_func = interp1d(anchor_indices, anchor_values, kind='linear', bounds_error=False, fill_value="extrapolate")
+
+        gap_indices = np.arange(start_idx, end_idx)
+        reconstructed_signal[gap_indices] = interp_func(gap_indices)
+
+    return reconstructed_signal
+
+def reconstruct_noise(raw_ppg, all_noisy_segments, fs):
+    RECONSTRUCTION_THRESHOLD_SEC = 1.0
+
+    segments_to_remove = []
+    segments_to_reconstruct = []
+    threshold_samples = RECONSTRUCTION_THRESHOLD_SEC * fs
+
+    for start, end in all_noisy_segments:
+        if (end - start) <= threshold_samples:
+            segments_to_reconstruct.append((start, end))
+        else:
+            segments_to_remove.append((start, end))
+    logger.info(f"Found {len(segments_to_reconstruct)} segments to reconstruct")
+    logger.info(f"Found {len(segments_to_remove)} segments to remove")
+
+    ppg_reconstructed = reconstruct_short_gaps(raw_ppg, segments_to_reconstruct, fs)
+
+    return ppg_reconstructed, segments_to_remove
+
+def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, original_len, removed_segments, ppg_fs,
+                                      rr_fs, window_size_sec, step_size_sec):
+    if subject_id == '45':
+        print("subject id with no segments")
+        print(len(ppg_signal))
+    ppg_segments = []
+    final_rr_labels = []
+
+    window_samples = window_size_sec * ppg_fs
+    step_samples = step_size_sec * ppg_fs
+    fs_ratio = ppg_fs / rr_fs
+
+    # --- Find Continuous Blocks (Bug Fixed) ---
+    # BUG FIX: Initialize with the full signal range to start the process.
+    continuous_blocks = [(0, original_len)]
+    if removed_segments:
+        for rem_start, rem_end in removed_segments:
+            new_blocks = []
+            for block_start, block_end in continuous_blocks:
+                # If the removed segment is outside this block, keep the block
+                if rem_end <= block_start or rem_start >= block_end:
+                    new_blocks.append((block_start, block_end))
+                    continue
+                # If there's a valid portion before the removed segment
+                if rem_start > block_start:
+                    new_blocks.append((block_start, rem_start))
+                # If there's a valid portion after the removed segment
+                if rem_end < block_end:
+                    new_blocks.append((rem_end, block_end))
+            continuous_blocks = new_blocks
+
+    # --- Create Index Mappings (Calculated Once) ---
+    # Create mapping for PPG signal indices
+    keep_mask_ppg = np.ones(original_len, dtype=bool)
+    for start, end in removed_segments:
+        keep_mask_ppg[start:end] = False
+    clean_indices_map_ppg = np.cumsum(keep_mask_ppg) - 1
+
+    # OPTIMIZATION: This block is now calculated only once for efficiency.
+    # Create mapping for RR label indices
+    rr_original_len = int(np.ceil(original_len / fs_ratio))
+    keep_mask_rr = np.ones(rr_original_len, dtype=bool)
+    for rs, re in removed_segments:
+        start_rr = int(np.floor(rs / fs_ratio))
+        end_rr = int(np.ceil(re / fs_ratio))
+        if start_rr < end_rr: # Ensure valid slice
+             keep_mask_rr[start_rr:end_rr] = False
+    clean_rr_map = np.cumsum(keep_mask_rr) - 1
+
+    # --- Main Segmentation Loop ---
+    for block_start, block_end in continuous_blocks:
+        for current_pos in range(block_start, block_end - window_samples + 1, step_samples):
+            seg_start_orig = current_pos
+            seg_end_orig = current_pos + window_samples
+
+            # Map PPG indices and get segment
+            seg_start_clean = clean_indices_map_ppg[seg_start_orig]
+            # The length of the segment is fixed, so we just add window_samples
+            seg_end_clean = seg_start_clean + window_samples
+            ppg_segment = ppg_signal[seg_start_clean:seg_end_clean]
+
+            # Map RR indices and get average label
+            rr_start_idx_orig = int(np.floor(seg_start_orig / fs_ratio))
+            rr_end_idx_orig = int(np.floor((seg_end_orig - 1) / fs_ratio))
+
+            rr_start_idx_clean = clean_rr_map[rr_start_idx_orig]
+            rr_end_idx_clean = clean_rr_map[rr_end_idx_orig]
+
+            if rr_start_idx_clean <= rr_end_idx_clean:
+                rr_slice = rr_labels[rr_start_idx_clean : rr_end_idx_clean + 1]
+                
+                if np.isnan(rr_slice).any():
+                    continue
+                # Check if len(rr_slice) > 0, corrected from len(rr_slice > 0)
+                if len(rr_slice) > 0:
+                    average_rr = np.mean(rr_slice)
+                    final_rr_labels.append(average_rr)
+                    ppg_segments.append(ppg_segment)
+
+    return ppg_segments, final_rr_labels
 
 
 def process_data(cfg, raw_data, dataset_name='bidmc'):
@@ -412,37 +604,210 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         if dataset_name == "bidmc":
             original_rate = 125
 
+        check_effect = False
         
-        ppg_denoised, merged_segments = edpa_denoiser(ppg, original_rate)
-        logger.info(f"type raw ppg: {type(ppg)}")
-        logger.info(f"type ppg_denoised: {type(ppg_denoised)}")
-        logger.info(f"raw_ppg[615:700]: {ppg[615:700]}")
-        logger.info(f"ppg_denoised[615:700]: {ppg_denoised[615:700]}")
-        ppg_filtered = apply_bandpass_filter(cfg, ppg, original_rate)
+        _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
+        if merged_segments:
+            ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
+            expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
+            ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
+            rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
+        else:
+            logger.info(f"for this subject {subject_data['subject_id']} there is no noise detected!")
+            expanded_removed_segments = []
+            ppg_denoised = ppg
+            rr_labels_denoised = rr
+        # logger.info(f"type raw ppg: {type(ppg)}")
+        # logger.info(f"type ppg_denoised: {type(ppg_denoised)}")
+        # logger.info(f"raw_ppg[615:700]: {ppg[615:700]}")
+        # logger.info(f"ppg_denoised[615:700]: {ppg_denoised[615:700]}")
+        ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
         if np.any(np.isnan(ppg_filtered)):
             logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
 
-        check_bandpass_filter_effect(ppg, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
+        # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
 
         ppg_cliped,lower_band, higher_band = remove_outliers(ppg_filtered)
-        check_outliers_removal_effect(ppg_filtered, ppg_cliped, original_rate, lower_band, higher_band)
+        # check_outliers_removal_effect(ppg_filtered, ppg_cliped, original_rate, lower_band, higher_band)
 
         ppg_normalized = normalize_signal(ppg_cliped)
-        check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
+        # check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
 
+
+        X, y = create_segments_with_gap_handling(
+            subject_data["subject_id"],
+            ppg_normalized,
+            rr_labels_denoised,
+            original_len=len(ppg),
+            removed_segments=expanded_removed_segments,
+            ppg_fs=original_rate,
+            rr_fs=1,
+            window_size_sec=32,
+            step_size_sec=2
+        )
+        subject_id = subject_data["subject_id"]
         processed_data.append({
-            "subject_id": subject_data["subject_id"],
-            "PPG": ppg_normalized,
-            "RR": rr
+            "subject_id": subject_id,
+            "PPG": X,
+            "RR": y
         })
-        exit()
+
+        # logger.info(f"processed data is {processed_data}")
+        
     return processed_data
+
+
+def create_balanced_folds(processed_data, n_splits=5):
+
+    
+    
+    subject_segment_counts = [(item["subject_id"], len(item["PPG"])) for item in processed_data]
+    subject_segment_counts.sort(key=lambda x: x[1], reverse=True)
+    logger.info(f"Subject segment counts (sorted): {subject_segment_counts}")
+    folds = [[] for _ in range(n_splits)]
+    fold_segment_totals = [0] * n_splits
+    for subject_id, segment_count in subject_segment_counts:
+
+        lightest_fold_index = np.argmin(fold_segment_totals)
+        folds[lightest_fold_index].append(subject_id)
+        fold_segment_totals[lightest_fold_index] += segment_count
+
+    logger.info(f"Number of segments in each fold: {fold_segment_totals}")
+
+    test_subjects = folds.copy()
+    val_subjects = [test_subjects[i+1 if i+1 < n_splits else 0] for i in range(n_splits)]
+    train_subjects = []
+    for i in range(n_splits):
+        train = []
+        for j in range(n_splits):
+            if j != i and j != (i + 1) % n_splits:
+                train.extend(folds[j])
+        train_subjects.append(train)
+    logger.info(f"Test subjects in each fold: {test_subjects}")
+    logger.info(f"Validation subjects in each fold: {val_subjects}")
+    logger.info(f"Train subjects in each fold: {train_subjects}")
+
+    all_subjects = set(item["subject_id"] for item in processed_data)
+
+    cv_splits = []
+    for i in range(n_splits):
+        test_set = set(test_subjects[i])
+        val_set = set(val_subjects[i])
+        train_set = set(train_subjects[i])
+
+        overlap_test_val = test_set & val_set
+        overlap_test_train = test_set & train_set
+        overlap_val_train = val_set & train_set
+
+        logger.info(f"Fold {i+1} overlap between test and val: {overlap_test_val}")
+        logger.info(f"Fold {i+1} overlap between test and train: {overlap_test_train}")
+        logger.info(f"Fold {i+1} overlap between validation and train: {overlap_val_train}")
+
+        union = train_set | val_set | test_set
+        coverage = union == all_subjects
+        missing_subjects = all_subjects - union if not coverage else set()
+        
+        logger.info(f"Fold {i+1} covers all subjects: {coverage}")
+        logger.info(f"Fold {i+1} missing subjects: {missing_subjects}")
+        cv_splits.append({
+            "train_subjects": train_subjects[i],
+            "val_subjects": val_subjects[i],
+            "test_subjects": test_subjects[i],
+            "fold_id": i+1
+        })
+
+
+    return cv_splits
+
+def create_data_splits(cv_split, processed_data):
+
+    train_subjects = cv_split["train_subjects"]
+    validation_subjects = cv_split["val_subjects"]
+    test_subjects = cv_split["test_subjects"]
+
+    subject_ids = [item["subject_id"] for item in processed_data]
+
+    train_ppg_list = []
+    train_rr_list = []
+    for train_subject in train_subjects:
+        if train_subject in subject_ids:
+            train_ppg_list.append(processed_data[train_subject]["PPG"])
+            train_rr_list.append(processed_data[train_subject]["RR"])
+        else:
+            logger.warning(f"Train subject {train_subject} not found in processed data.")
+    
+    val_ppg_list = []
+    val_rr_list = []
+    for val_subject in validation_subjects:
+        if val_subject in subject_ids:
+            val_ppg_list.append(processed_data[val_subject]["PPG"])
+            val_rr_list.append(processed_data[val_subject]["RR"])
+        else:
+            logger.warning(f"Validation subject {val_subject} not found in processed data.")
+
+    test_ppg_list = []
+    test_rr_list = []
+    for test_subject in test_subjects:
+        if test_subject in subject_ids:
+            test_ppg_list.append(processed_data[test_subject]["PPG"])
+            test_rr_list.append(processed_data[test_subject]["RR"])
+        else:
+            logger.warning(f"Test subject {test_subject} not found in processed data.")
+
+    logger.info(f"train ppg shape: {[len(x) for x in train_ppg_list]}")
+
+    return {
+        'train_ppg': train_ppg_list,
+        'train_rr': train_rr_list,
+        'val_ppg': val_ppg_list,
+        'val_rr': val_rr_list,
+        'test_ppg': test_ppg_list,
+        'test_rr': test_rr_list,
+        'train_subjects': train_subjects,
+        'val_subjects': validation_subjects,
+        'test_subjects': test_subjects
+    }
+
+# def train_single_fold(fold_data, fold_id):
+        
+def train(cv_splits, processed_data):
+    for cv_split in cv_splits:
+        fold_data = create_data_splits(cv_split, processed_data)
+    return "hi"
+
+
 
 @hydra.main(config_path="../", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     print(cfg)
     raw_data = read_data("data/")
     processed_data = process_data(cfg, raw_data)
+
+
+    print(f"processed data length: {len(processed_data)}")
+    print(f"processed data for subjec")
+
+    count_zero = 0
+    segment_counts = {}
+    for entry in processed_data:
+        subject_id = entry["subject_id"]
+        n_segments = len(entry["RR"])   # or entry["PPG"].shape[0]
+        segment_counts[subject_id] = n_segments
+        if n_segments == 0: count_zero += 1
+
+    print(segment_counts)
+    logger.info(f"number of subjects with zero segments is: {count_zero}")
+
+    min_len = min(segment_counts.values())
+    logger.info(f"minimum number of segments across subjects: {min_len}")
+    
+
+    cv_splits = create_balanced_folds(processed_data, n_splits=5)
+    logger.info(f"Created folds: {cv_splits}")
+
+    train(cv_splits, processed_data)
+    
+
     print("Hello, World!")
 
 
