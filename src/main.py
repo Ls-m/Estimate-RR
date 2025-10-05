@@ -9,6 +9,14 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch,spectrogram, find_peaks
 from sklearn.preprocessing import StandardScaler
 from scipy.interpolate import interp1d
+from dataset import PPGRRDataset, PPGRRDataModule
+from model import RRLightningModule
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.loggers import TensorBoardLogger
+import time
+from pytorch_lightning.profilers import SimpleProfiler
+from tqdm import tqdm
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -594,6 +602,26 @@ def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, origina
     return ppg_segments, final_rr_labels
 
 
+def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
+
+    if nperseg is None:
+        nperseg = min(1024, len(ppg_segment))
+    
+    freqs, psd = welch(ppg_segment, fs=fs, nperseg=nperseg, window='hann', scaling='density')
+    band_mask = (freqs >= fmin) & (freqs <= fmax)
+    psd_band = psd[band_mask]
+    psd_band = psd_band / (np.sum(psd_band) + 1e-12)
+
+    return psd_band.astype(np.float32)
+
+def compute_freq_features(ppg_segments, fs):
+    freq_features = []
+    for segment in tqdm(ppg_segments, desc="Computing frequency features"):
+        features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=256)
+        freq_features.append(features)
+    freq_features = np.stack(freq_features, axis=0)
+    return freq_features
+
 def process_data(cfg, raw_data, dataset_name='bidmc'):
     # Code to process data goes here
     processed_data = {}
@@ -650,13 +678,14 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             step_size_sec=2
         )
         
+        freq_segments = compute_freq_features(ppg_segments, original_rate)
         # processed_data.append({
         #     "subject_id": subject_id,
         #     "PPG": X,
         #     "RR": y
         # })
 
-        processed_data[subject_id] = (ppg_segments, rr_segments)
+        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments)
         # logger.info(f"processed data is {processed_data}")
         
     return processed_data
@@ -778,12 +807,92 @@ def create_data_splits(cv_split, processed_data):
         'test_subjects': test_subjects
     }
 
+
+
+class FirstBatchTimer(pl.Callback):
+    def __init__(self):
+        self._epoch_start_time = None
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        self._epoch_start_time = time.time()
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        if batch_idx == 0 and self._epoch_start_time is not None:
+            gap = time.time() - self._epoch_start_time
+            print(f"⏱️ Time from epoch start (0%) to first batch (1%): {gap:.2f} sec")
+            self._epoch_start_time = None
+
 # def train_single_fold(fold_data, fold_id):
-        
-def train(cv_splits, processed_data):
+def setup_callbacks(cfg):
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val_loss',
+        dirpath=cfg.training.checkpoint_dir,
+        filename='best-checkpoint-fold{fold_id}-' + '{epoch:02d}-{val_loss:.2f}',
+        save_top_k=1,
+        save_last=True,
+        mode='min',
+        verbose=True
+    )
+    early_stopping_callback = EarlyStopping(
+        monitor='val_loss',
+        patience=cfg.training.early_stopping_patience,
+        mode='min',
+        min_delta=0.001,
+        verbose=True
+    )
+    return [checkpoint_callback, early_stopping_callback, FirstBatchTimer()]
+
+def train(cfg, cv_splits, processed_data):
+
+    all_fold_results = []
     for cv_split in cv_splits:
         fold_data = create_data_splits(cv_split, processed_data)
-    return "hi"
+        train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'])
+        val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'])
+        test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'])
+
+        batch_size = cfg.training.batch_size
+        num_workers = cfg.training.num_workers
+        data_module = PPGRRDataModule(train_dataset, val_dataset, test_dataset, batch_size=batch_size, num_workers=num_workers)
+        logger.info(f"train dataset shape is {train_dataset[0][0].shape}")
+        callbacks = setup_callbacks(cfg)
+        # Setup logger
+        tblogger = TensorBoardLogger(
+            save_dir=cfg.logging.log_dir,
+            name=cfg.logging.experiment_name,
+            version=f'fold_{cv_split["fold_id"]}'
+        )
+
+        profiler = SimpleProfiler(dirpath="profiles", filename="profiler_summary.txt")  # Saves to file
+
+        trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
+                             accelerator="auto",
+                             devices=cfg.hardware.devices,
+                             callbacks=callbacks,
+                             logger=tblogger,
+                             enable_progress_bar=True,
+                             log_every_n_steps=5,
+                             gradient_clip_val=cfg.training.gradient_clip_val,
+                             accumulate_grad_batches=1,
+                             profiler=profiler,
+                             benchmark=False
+                             )
+        model = RRLightningModule(cfg)
+        
+        trainer.fit(model, data_module)
+        # Write profiler summary to file
+        os.makedirs("profiles", exist_ok=True)
+        summary = profiler.summary()
+        with open("profiles/profiler_summary.txt", "w") as f:
+            f.write(summary)
+        test_reults = trainer.test(model, datamodule=data_module, ckpt_path="best")
+        all_fold_results.append({
+            "fold_id": cv_split["fold_id"],
+            "test_results": test_reults[0]
+        })
+        logger.info(f"Completed training for fold {cv_split['fold_id']}. Test results: {test_reults}")
+
+    return all_fold_results
 
 
 
@@ -799,7 +908,7 @@ def main(cfg: DictConfig):
 
     count_zero = 0
     segment_counts = {}
-    for subject_id, (ppg_segments, rr_segments) in processed_data.items():
+    for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items():
         
         n_segments = len(rr_segments)   # or entry["PPG"].shape[0]
         segment_counts[subject_id] = n_segments
@@ -815,9 +924,17 @@ def main(cfg: DictConfig):
     cv_splits = create_balanced_folds(processed_data, n_splits=5)
     logger.info(f"Created folds: {cv_splits}")
 
-    train(cv_splits, processed_data)
-    
+    all_fold_results = train(cfg, cv_splits, processed_data)
 
+    for fold_result in all_fold_results:
+        logger.info(f"Fold {fold_result['fold_id']} test results: {fold_result['test_results']}")
+
+    # Summarize all fold results
+
+    print(f"\nTraining completed!")
+    print(f"all fold results: {all_fold_results}")
+    all_maes = [fold_result['test_results']['test_mae'] for fold_result in all_fold_results]
+    print(f"Average MAE across folds: {np.mean(all_maes):.4f} ± {np.std(all_maes):.4f}")
     print("Hello, World!")
 
 
