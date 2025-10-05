@@ -17,6 +17,9 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import time
 from pytorch_lightning.profilers import SimpleProfiler
 from tqdm import tqdm
+import pywt
+from joblib import Parallel, delayed
+import multiprocessing
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -602,6 +605,54 @@ def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, origina
     return ppg_segments, final_rr_labels
 
 
+def plot_cwt_scalogram(ppg_segment, fs, fmin=0.1, fmax=0.6, num_scales=50):
+    dt = 1.0 / fs
+    fc = pywt.central_frequency('morl')
+    
+    scale_min = fc / (fmax * dt)
+    scale_max = fc / (fmin * dt)
+    scales = np.linspace(scale_min, scale_max, num_scales)
+
+    cwt_coeffs, freqs = pywt.cwt(ppg_segment, scales, 'morl', sampling_period=dt)
+    power = np.abs(cwt_coeffs)
+
+    # Plot scalogram
+    plt.figure(figsize=(10, 5))
+    extent = [0, len(ppg_segment) / fs, freqs.min(), freqs.max()]
+    plt.imshow(power, extent=extent, cmap='viridis', aspect='auto', origin='lower')
+    plt.colorbar(label='Amplitude')
+    plt.xlabel('Time (s)')
+    plt.ylabel('Frequency (Hz)')
+    plt.title('CWT Scalogram (Respiratory Band)')
+    plt.show()
+
+def extract_cwt_features(ppg_segment, fs, fmin=0.1, fmax=0.6, num_scales=50):
+    dt = 1.0 / fs
+    fc = pywt.central_frequency('morl')  # ≈0.8125; auto-computes for precision
+    
+    # Compute scales for the frequency band
+    scale_min = fc / (fmax * dt)
+    scale_max = fc / (fmin * dt)
+    scales = np.linspace(scale_min, scale_max, num_scales)
+    
+    # Apply CWT
+    cwt_coeffs, freqs = pywt.cwt(ppg_segment, scales, 'morl', sampling_period=dt)
+    
+    # Filter to respiratory band (now fully covered)
+    resp_mask = (freqs >= fmin) & (freqs <= fmax)
+    cwt_resp = cwt_coeffs[resp_mask, :]
+    
+    # Pool: Mean absolute over time per scale (robust summary)
+    features = np.mean(np.abs(cwt_resp), axis=1)
+    
+    # Safe print: Check mask before min/max
+    # if np.any(resp_mask):
+    #     print(f"Generated {features.shape[0]} features covering {freqs[resp_mask].min():.3f}–{freqs[resp_mask].max():.3f} Hz")
+    # else:
+    #     print("Warning: No frequencies in respiratory band—check scales/fs.")
+    
+    return features.astype(np.float32)
+
 def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     if nperseg is None:
@@ -614,14 +665,25 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     return psd_band.astype(np.float32)
 
-def compute_freq_features(ppg_segments, fs):
-    freq_features = []
-    for segment in tqdm(ppg_segments, desc="Computing frequency features"):
-        features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
-        print("Single segment frequency feature shape:", features.shape)
-        freq_features.append(features)
-    freq_features = np.stack(freq_features, axis=0)
-    return freq_features
+
+def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
+    def process_single(segment):
+        return extract_cwt_features(segment, fs, num_scales=25)
+    
+    freq_features = Parallel(n_jobs=n_jobs)(
+        delayed(process_single)(segment) for segment in tqdm(ppg_segments)
+    )
+    return np.stack(freq_features, axis=0)
+
+# def compute_freq_features(ppg_segments, fs):
+#     freq_features = []
+#     for segment in tqdm(ppg_segments, desc="Computing frequency features"):
+#         # features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
+#         features  = extract_cwt_features(segment, fs, fmin=0.1, fmax=0.6, num_scales=50)
+#         # print("Single segment frequency feature shape:", features.shape)
+#         freq_features.append(features)
+#     freq_features = np.stack(freq_features, axis=0)
+#     return freq_features
 
 def check_freq_features(freq_segments, rr_segments, subject_id):
     logger.info(f"Frequency features shape for subject {subject_id}: {freq_segments.shape}")
@@ -688,8 +750,9 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             step_size_sec=2
         )
         
+        # plot_cwt_scalogram(ppg_segments[0], original_rate)
         freq_segments = compute_freq_features(ppg_segments, original_rate)
-        check_freq_features(freq_segments, rr_segments, subject_id)
+        # check_freq_features(freq_segments, rr_segments, subject_id)
         # processed_data.append({
         #     "subject_id": subject_id,
         #     "PPG": X,
