@@ -3,3 +3,28 @@ preprocessing:
     low_freq: 0.1  # Lower frequency for better stability
     high_freq: 0.6   # Higher frequency, well below Nyquist
     order: 4         # Lower order for better numerical stability
+
+
+
+training:
+  model_name: "LSTMRR" # Model architecture to use
+  batch_size: 64 # Batch size for training
+  learning_rate: 5e-4 # Learning rate for the optimizer
+  optimizer: "adamw" # Optimizer type
+  weight_decay: 1e-4 # Weight decay for regularization
+  scheduler: "reduce_on_plateau" # Learning rate scheduler type
+  max_epochs: 1 # Maximum number of training epochs
+  num_workers: 4 # Number of workers for data loading
+  criterion: "MSELoss" # Loss function
+  checkpoint_dir: "checkpoints" # Directory to save model checkpoints
+  early_stopping_patience: 10 # Patience for early stopping
+  gradient_clip_val: 1.0 # Gradient clipping value
+  n_freq_bins: 8 # Number of frequency bins for frequency-domain features
+
+logging:
+  log_dir: "logs" # Directory for logging
+  experiment_name: "RR_Estimation" # Name of the experiment for logging
+# Hardware Configuration
+hardware:
+  devices: 1
+  precision: 32

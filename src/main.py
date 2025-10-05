@@ -617,10 +617,20 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 def compute_freq_features(ppg_segments, fs):
     freq_features = []
     for segment in tqdm(ppg_segments, desc="Computing frequency features"):
-        features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=256)
+        features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
+        print("Single segment frequency feature shape:", features.shape)
         freq_features.append(features)
     freq_features = np.stack(freq_features, axis=0)
     return freq_features
+
+def check_freq_features(freq_segments, rr_segments, subject_id):
+    logger.info(f"Frequency features shape for subject {subject_id}: {freq_segments.shape}")
+    plt.figure(figsize=(10,6))
+    plt.plot(freq_segments[0])
+    plt.title(f"Frequency-domain features for first PPG segment for subject {subject_id} with RR {rr_segments[0]}")
+    plt.xlabel("Frequency bin")
+    plt.ylabel("Normalized PSD")
+    plt.show()
 
 def process_data(cfg, raw_data, dataset_name='bidmc'):
     # Code to process data goes here
@@ -679,6 +689,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         )
         
         freq_segments = compute_freq_features(ppg_segments, original_rate)
+        check_freq_features(freq_segments, rr_segments, subject_id)
         # processed_data.append({
         #     "subject_id": subject_id,
         #     "PPG": X,
@@ -695,7 +706,7 @@ def create_balanced_folds(processed_data, n_splits=5):
 
 
 
-    subject_segment_counts = [(subject_id, len(ppg_segments)) for subject_id, (ppg_segments, rr_segments) in processed_data.items()]
+    subject_segment_counts = [(subject_id, len(ppg_segments)) for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items()]
     subject_segment_counts.sort(key=lambda x: x[1], reverse=True)
     logger.info(f"Subject segment counts (sorted): {subject_segment_counts}")
     folds = [[] for _ in range(n_splits)]
@@ -721,7 +732,7 @@ def create_balanced_folds(processed_data, n_splits=5):
     logger.info(f"Validation subjects in each fold: {val_subjects}")
     logger.info(f"Train subjects in each fold: {train_subjects}")
 
-    all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments) in processed_data.items())
+    all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items())
 
     cv_splits = []
     for i in range(n_splits):
@@ -759,49 +770,61 @@ def create_data_splits(cv_split, processed_data):
     validation_subjects = cv_split["val_subjects"]
     test_subjects = cv_split["test_subjects"]
 
-    subject_ids = [subject_id for subject_id, (ppg_segments, rr_segments) in processed_data.items()]
+    subject_ids = [subject_id for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items()]
 
     train_ppg_list = []
     train_rr_list = []
+    train_freq_list = []
     for train_subject in train_subjects:
         if train_subject in subject_ids:
             train_ppg_list.append(processed_data[train_subject][0])
             train_rr_list.append(processed_data[train_subject][1])
+            train_freq_list.append(processed_data[train_subject][2])
         else:
             logger.warning(f"Train subject {train_subject} not found in processed data.")
     
     val_ppg_list = []
     val_rr_list = []
+    val_freq_list = []
     for val_subject in validation_subjects:
         if val_subject in subject_ids:
             val_ppg_list.append(processed_data[val_subject][0])
             val_rr_list.append(processed_data[val_subject][1])
+            val_freq_list.append(processed_data[val_subject][2])
         else:
             logger.warning(f"Validation subject {val_subject} not found in processed data.")
 
     test_ppg_list = []
     test_rr_list = []
+    test_freq_list = []
     for test_subject in test_subjects:
         if test_subject in subject_ids:
             test_ppg_list.append(processed_data[test_subject][0])
             test_rr_list.append(processed_data[test_subject][1])
+            test_freq_list.append(processed_data[test_subject][2])
         else:
             logger.warning(f"Test subject {test_subject} not found in processed data.")
     train_ppg = np.concatenate(train_ppg_list, axis=0)
     train_rr = np.concatenate(train_rr_list, axis=0)
+    train_freq = np.concatenate(train_freq_list, axis=0)
     val_ppg = np.concatenate(val_ppg_list, axis=0)
     val_rr = np.concatenate(val_rr_list, axis=0)
+    val_freq = np.concatenate(val_freq_list, axis=0)
     test_ppg = np.concatenate(test_ppg_list, axis=0)
     test_rr = np.concatenate(test_rr_list, axis=0)
+    test_freq = np.concatenate(test_freq_list, axis=0)
     logger.info(f"train ppg shape: {train_ppg.shape}")
 
     return {
         'train_ppg': train_ppg,
         'train_rr': train_rr,
+        'train_freq': train_freq,
         'val_ppg': val_ppg,
         'val_rr': val_rr,
+        'val_freq': val_freq,
         'test_ppg': test_ppg,
         'test_rr': test_rr,
+        'test_freq': test_freq,
         'train_subjects': train_subjects,
         'val_subjects': validation_subjects,
         'test_subjects': test_subjects
@@ -847,9 +870,9 @@ def train(cfg, cv_splits, processed_data):
     all_fold_results = []
     for cv_split in cv_splits:
         fold_data = create_data_splits(cv_split, processed_data)
-        train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'])
-        val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'])
-        test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'])
+        train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'])
+        val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'])
+        test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'])
 
         batch_size = cfg.training.batch_size
         num_workers = cfg.training.num_workers

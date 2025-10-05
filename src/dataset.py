@@ -8,9 +8,10 @@ logger = logging.getLogger("Dataset")
 
 
 class PPGRRDataset(Dataset):
-    def __init__(self, ppg_data, rr_data, augment=False):
+    def __init__(self, ppg_data, rr_data, freq_data, augment=False):
         self.ppg_data = ppg_data
         self.rr_data = rr_data
+        self.freq_data = freq_data
         self.augment = augment
 
         if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
@@ -26,6 +27,7 @@ class PPGRRDataset(Dataset):
     def __getitem__(self, idx):
         ppg_segment = self.ppg_data[idx]
         rr = self.rr_data[idx]
+        freq = self.freq_data[idx]
 
         if self.augment:
             if torch.rand(1) < 0.5:
@@ -39,7 +41,8 @@ class PPGRRDataset(Dataset):
 
         ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32).unsqueeze(-1)
         rr_tensor = torch.tensor(rr, dtype=torch.float32)
-        return ppg_tensor, rr_tensor
+        freq_tensor = torch.tensor(freq, dtype=torch.float32)
+        return ppg_tensor, rr_tensor, freq_tensor
 
 
 class PPGRRDataModule(LightningDataModule):

@@ -3,7 +3,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 class LSTMRRModel(nn.Module):
-    def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=1, dropout=0.2):
+    def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=64, dropout=0.2):
         super(LSTMRRModel, self).__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
         self.fc = nn.Linear(hidden_size, output_size)
@@ -13,7 +13,18 @@ class LSTMRRModel(nn.Module):
         out = self.fc(lstm_out[:, -1, :])
         return out
     
+class FreqEncoder(nn.Module):
+    def __init__(self, n_bins, hidden=32):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_bins, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU()
+        )
 
+    def forward(self, x):
+        return self.net(x)
 
 
 class RRLightningModule(pl.LightningModule):
@@ -23,17 +34,26 @@ class RRLightningModule(pl.LightningModule):
         self.learning_rate = cfg.training.learning_rate
         self.weight_decay = cfg.training.weight_decay
         self.scheduler = cfg.training.scheduler
+        self.freq_bins = cfg.training.n_freq_bins
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.test_step_outputs = []
+
+        fusion_dim = 64 + 32
+        self.head = nn.Sequential(
+            nn.Linear(fusion_dim, 64),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(64, 1)
+        )
 
         model_name = cfg.training.model_name
         if model_name == "LSTMRR":
             model = LSTMRRModel()
         else:
             raise ValueError(f"Unsupported model name: {model_name}")
-        self.model = model
-
+        self.time_model = model
+        self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=32)
         if cfg.training.criterion == "MSELoss":
             self.criterion = nn.MSELoss()
         elif cfg.training.criterion == "L1Loss":
@@ -41,12 +61,18 @@ class RRLightningModule(pl.LightningModule):
         else:
             raise ValueError(f"Unsupported criterion: {cfg.training.criterion}")
     
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, ppg, freq):
+        t = self.time_model(ppg)
+        f = self.freq_model(freq)    # (B, 32)
+        z = torch.cat([t, f], dim=1)
+        # print("------------- z shape:", z.shape)
+        out = self.head(z).squeeze(-1)   # (B,)
+        return out
+ 
     
     def training_step(self, batch, batch_idx):
-        ppg, rr = batch
-        rr_pred = self.forward(ppg)
+        ppg, rr, freq = batch
+        rr_pred = self.forward(ppg, freq)
         rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -76,8 +102,8 @@ class RRLightningModule(pl.LightningModule):
         self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
-        ppg, rr = batch
-        rr_pred = self.forward(ppg)
+        ppg, rr, freq = batch
+        rr_pred = self.forward(ppg, freq)
         rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -107,8 +133,8 @@ class RRLightningModule(pl.LightningModule):
 
     
     def test_step(self, batch, batch_idx):
-        ppg, rr = batch
-        rr_pred = self.forward(ppg)
+        ppg, rr, freq = batch
+        rr_pred = self.forward(ppg, freq)
         rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
         self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
