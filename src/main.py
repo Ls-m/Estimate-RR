@@ -22,6 +22,9 @@ from joblib import Parallel, delayed, cpu_count
 import multiprocessing
 import torch
 from pytorch_lightning.callbacks.progress import TQDMProgressBar
+import optuna
+from my_optuna import objective
+import json
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -753,7 +756,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         )
         
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
-        n_jobs = max(1, cpu_count() - 1)
+        n_jobs = max(1, cpu_count() - 6)
         freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
         # check_freq_features(freq_segments, rr_segments, subject_id)
         # processed_data.append({
@@ -947,6 +950,31 @@ def train(cfg, cv_splits, processed_data):
         num_workers = cfg.training.num_workers
         data_module = PPGRRDataModule(train_dataset, val_dataset, test_dataset, batch_size=batch_size, num_workers=num_workers)
         logger.info(f"train dataset shape is {train_dataset[0][0].shape}")
+
+
+        study = optuna.create_study(
+            direction="minimize",
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=5)
+        )
+
+        # Optimize
+        study.optimize(lambda trial: objective(trial, cfg, fold_data), n_trials=3)
+
+        # Print best params
+        print("Best hyperparameters:", study.best_params)
+        print("Best value:", study.best_value)
+
+        # Optional: Save as JSON (from previous)
+        
+        best_results = {
+            "best_params": study.best_params,
+            "best_value": study.best_value,
+            "n_trials": len(study.trials)
+        }
+        with open("best_hparams.json", "w") as f:
+            json.dump(best_results, f, indent=4, default=str)
+
+        exit()
 
 
         logger.info(f"[Fold {fold_id}] Starting SSL Pre-training...")

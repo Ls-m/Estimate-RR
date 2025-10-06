@@ -1,51 +1,87 @@
+
+import optuna
+from optuna.integration import PyTorchLightningPruningCallback
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
+from torch.utils.data import Dataset
+import numpy as np
 from pytorch_lightning import LightningDataModule
 
+# This simple wrapper resolves the inheritance issue with PyTorch Lightning 2.x
+class OptunaPruningCallback(PyTorchLightningPruningCallback, pl.Callback):
+    pass
 
+class OptunaDataset(Dataset):
+    def __init__(self, ppg_data, rr_data, freq_data, augment=False):
+        self.ppg_data = ppg_data
+        self.rr_data = rr_data
+        self.freq_data = freq_data
+        self.augment = augment
 
-def ppg_augmentation(x, crop_ratio=0.8):
-    """
-    Applies a simple random temporal crop augmentation to a batch of PPG signals.
-    
-    Args:
-        x (Tensor): Input batch of PPG signals with shape (B, SeqLen, Features).
-        crop_ratio (float): The ratio of the original sequence length to crop.
+        if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
+            print(f"nan or inf in ppg_data")
         
-    Returns:
-        Tensor: The augmented (cropped and resized) PPG signals.
-    """
-    batch_size, seq_len, _ = x.shape
-    crop_len = int(seq_len * crop_ratio)
-    
-    # Generate a random starting point for the crop for each item in the batch
-    start = torch.randint(0, seq_len - crop_len + 1, (batch_size,))
-    
-    # Create cropped segments using advanced indexing
-    cropped_segments = [x[i, start[i]:start[i]+crop_len, :] for i in range(batch_size)]
-    cropped_x = torch.stack(cropped_segments)
-    
-    # Interpolate back to the original sequence length
-    # Note: Interpolation requires (N, C, L) format
-    augmented_x = F.interpolate(cropped_x.permute(0, 2, 1), size=seq_len, mode='linear', align_corners=False)
-    
-    return augmented_x.permute(0, 2, 1)
+        if np.any(np.isnan(rr_data)) or np.any(np.isinf(rr_data)):
+            print(f"nan or inf in rr_data")
 
 
-class LSTMRRModel(nn.Module):
-    def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=64, dropout=0.2):
-        super(LSTMRRModel, self).__init__()
+    def __len__(self):
+        return len(self.ppg_data)
+
+    def __getitem__(self, idx):
+        ppg_segment = self.ppg_data[idx]
+        rr = self.rr_data[idx]
+        freq = self.freq_data[idx]
+
+        if self.augment:
+            if torch.rand(1) < 0.5:
+                noise_std = 0.05 * torch.std(ppg_segment)
+                noise = np.random.normal(mean=0, std=noise_std, size=ppg_segment.shape)
+                ppg_segment += noise
+            
+            if torch.rand(1) < 0.5:
+                scale_factor = torch.FloatTensor(1).uniform_(0.8, 1.2)
+                ppg_segment = ppg_segment * scale_factor
+
+        ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32).unsqueeze(-1)
+        rr_tensor = torch.tensor(rr, dtype=torch.float32)
+        freq_tensor = torch.tensor(freq, dtype=torch.float32)
+        return ppg_tensor, rr_tensor, freq_tensor
+
+
+class OptunaDataModule(LightningDataModule):
+    def __init__(self, train_dataset, val_dataset, test_dataset, batch_size=32, num_workers=4):
+        super().__init__()
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.test_dataset = test_dataset
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, persistent_workers=True)
+
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True)
+
+    def test_dataloader(self):
+        return torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True)
+
+class OptunaTimeModel(nn.Module):
+    def __init__(self, input_size=1, hidden_size=64, num_layers=2, dropout=0.2):
+        super(OptunaTimeModel, self).__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
-        self.fc = nn.Linear(hidden_size, output_size)
+        self.fc = nn.Linear(hidden_size, hidden_size)
 
     def forward(self, x):
         lstm_out, _ = self.lstm(x)
         out = self.fc(lstm_out[:, -1, :])
         return out
     
-class FreqEncoder(nn.Module):
+class OptunaFreqModel(nn.Module):
     def __init__(self, n_bins, hidden=32):
         super().__init__()
         self.net = nn.Sequential(
@@ -59,33 +95,36 @@ class FreqEncoder(nn.Module):
         return self.net(x)
 
 
-class RRLightningModule(pl.LightningModule):
-    def __init__(self, cfg):
+class OptunaLightningModule(pl.LightningModule):
+    def __init__(self, cfg, learning_rate, weight_decay, scheduler, dropout, hidden_size1, hidden_size2, freq_bins):
         super().__init__()
         self.cfg = cfg.training
-        self.learning_rate = cfg.training.learning_rate
-        self.weight_decay = cfg.training.weight_decay
-        self.scheduler = cfg.training.scheduler
-        self.freq_bins = cfg.training.n_freq_bins
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.scheduler = scheduler
+        self.dropout = dropout
+        self.hidden_size1 = hidden_size1
+        self.hidden_size2 = hidden_size2
+        self.freq_bins = freq_bins
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.test_step_outputs = []
 
-        fusion_dim = 64 + 32
+        fusion_dim = hidden_size1 + hidden_size2
         self.head = nn.Sequential(
             nn.Linear(fusion_dim, 64),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(self.dropout),
             nn.Linear(64, 1)
         )
 
         model_name = cfg.training.model_name
         if model_name == "LSTMRR":
-            model = LSTMRRModel()
+            model = OptunaTimeModel(hidden_size=self.hidden_size1, dropout=self.dropout)
         else:
             raise ValueError(f"Unsupported model name: {model_name}")
         self.time_model = model
-        pretrained_path = cfg.training.get("pretrained_path")
+        pretrained_path = cfg.training.get("fold_1_encoder.pth")
         if pretrained_path:
             print(f"Loading pretrained weights from: {pretrained_path}")
             # Load the saved state dictionary of the encoder
@@ -95,7 +134,7 @@ class RRLightningModule(pl.LightningModule):
             print("Training time_model from scratch.")
 
 
-        self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=32)
+        self.freq_model = OptunaFreqModel(n_bins=self.freq_bins, hidden=self.hidden_size2)
         if cfg.training.criterion == "MSELoss":
             self.criterion = nn.MSELoss()
         elif cfg.training.criterion == "L1Loss":
@@ -113,7 +152,7 @@ class RRLightningModule(pl.LightningModule):
         # print("------------- z shape:", z.shape)
         out = self.head(z).squeeze(-1)   # (B,)
         return out
- 
+
     
     def training_step(self, batch, batch_idx):
         ppg, rr, freq = batch
@@ -247,114 +286,45 @@ class RRLightningModule(pl.LightningModule):
             }
         else:       
             return optimizer
-        
 
 
 
-class SSLPretrainModule(pl.LightningModule):
-
-    def __init__(self, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
-        super().__init__()
-        self.save_hyperparameters()
-
-
-        self.encoder = LSTMRRModel(output_size=64)
-
-        self.projection_head = nn.Sequential(
-            nn.Linear(64, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64)
-        )
-
+def objective(trial: optuna.Trial, cfg, fold_data):
+    # Suggest hyperparameters (no loaders here—handled by DataModule)
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1e-1, log=True)
+    weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
+    scheduler = trial.suggest_categorical("scheduler", ["StepLR", "ReduceLROnPlateau", "CosineAnnealingLR"])
+    dropout = trial.suggest_float("dropout", 0.1, 0.5)
+    hidden_size1 = trial.suggest_int("hidden_size1", 32, 64)
+    hidden_size2 = trial.suggest_int("hidden_size2", 32, 64)
+    num_scales = cfg.training.n_freq_bins  # Tune CWT scales
     
-    def forward(self, x):
-        return self.encoder(x)
+    train_dataset = OptunaDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'])
+    val_dataset = OptunaDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'])
+    test_dataset = OptunaDataset(fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'])
+
+    batch_size = cfg.training.batch_size
+    num_workers = cfg.training.num_workers
+    data_module = OptunaDataModule(train_dataset, val_dataset, test_dataset, batch_size=batch_size, num_workers=num_workers)
+    # Instantiate model
+    model = OptunaLightningModule(cfg, learning_rate=learning_rate, weight_decay=weight_decay, scheduler=scheduler, dropout=dropout, hidden_size1=hidden_size1, hidden_size2=hidden_size2,
+                            freq_bins=num_scales)  # Pass tuned n_freq_bins if needed
+
+    # Trainer with pruning callback
+    trainer = pl.Trainer(
+        max_epochs=2,  # Short for HPO
+        accelerator="auto",
+        devices=1,
+        logger=False,  # Skip for speed
+        enable_progress_bar=True,
+        callbacks=[
+            OptunaPruningCallback(trial, monitor="val_loss_epoch")
+        ]
+    )
     
-
-    def info_nce_loss(self, features, temperature):
-        # Create labels that identify positive pairs
-        labels = torch.cat([torch.arange(features.shape[0] // 2) for _ in range(2)], dim=0)
-        labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
-        labels = labels.to(self.device)
-
-        # Normalize features
-        features = F.normalize(features, dim=1)
-        
-        # Calculate cosine similarity matrix
-        similarity_matrix = torch.matmul(features, features.T)
-        
-        # Discard self-similarity from the matrix
-        mask = torch.eye(labels.shape[0], dtype=torch.bool).to(self.device)
-        labels = labels[~mask].view(labels.shape[0], -1)
-        similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
-        
-        # Select positive similarities
-        positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
-        
-        # Select negative similarities
-        negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
-        
-        logits = torch.cat([positives, negatives], dim=1)
-        # The first column (0) corresponds to the positive pair
-        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
-        
-        logits = logits / temperature
-        return F.cross_entropy(logits, labels)
+    # Train and validate via DataModule
+    trainer.fit(model, data_module)
     
-    def _shared_step(self, batch):
-        """
-        A shared step for training, validation, and testing to avoid code duplication.
-        """
-        # In SSL, we only need the PPG signal from the batch
-        ppg, _, _ = batch
-
-        # Create two augmented views of the input PPG
-        # NOTE: It's important that augmentation is applied here to get different views
-        # even for the validation and test sets.
-        view1 = ppg_augmentation(ppg)
-        view2 = ppg_augmentation(ppg)
-
-        # Get embeddings from the encoder
-        h1 = self.encoder(view1)
-        h2 = self.encoder(view2)
-
-        # Get projections from the projection head
-        z1 = self.projection_head(h1)
-        z2 = self.projection_head(h2)
-
-        # Concatenate projections for loss calculation
-        features = torch.cat([z1, z2], dim=0)
-
-        # Calculate contrastive loss
-        loss = self.info_nce_loss(features, self.hparams.temperature)
-        return loss
-
-    def training_step(self, batch, batch_idx):
-        loss = self._shared_step(batch)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        loss = self._shared_step(batch)
-        # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
-        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
-        return loss
-
-    def test_step(self, batch, batch_idx):
-        loss = self._shared_step(batch)
-        # Log the test loss.
-        self.log('test_loss', loss, on_epoch=True)
-        return loss
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.trainer.max_epochs,
-            eta_min=0
-        )
-        return [optimizer], [scheduler]
+    # Return metric to minimize
+    val_loss = trainer.callback_metrics["val_loss_epoch"].item()  # Or e.g., "val_mae" if you log MAE for RR
+    return val_loss
