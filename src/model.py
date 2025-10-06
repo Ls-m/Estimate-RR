@@ -1,6 +1,37 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+import torch.nn.functional as F
+
+
+
+def ppg_augmentation(x, crop_ratio=0.8):
+    """
+    Applies a simple random temporal crop augmentation to a batch of PPG signals.
+    
+    Args:
+        x (Tensor): Input batch of PPG signals with shape (B, SeqLen, Features).
+        crop_ratio (float): The ratio of the original sequence length to crop.
+        
+    Returns:
+        Tensor: The augmented (cropped and resized) PPG signals.
+    """
+    batch_size, seq_len, _ = x.shape
+    crop_len = int(seq_len * crop_ratio)
+    
+    # Generate a random starting point for the crop for each item in the batch
+    start = torch.randint(0, seq_len - crop_len + 1, (batch_size,))
+    
+    # Create cropped segments using advanced indexing
+    cropped_segments = [x[i, start[i]:start[i]+crop_len, :] for i in range(batch_size)]
+    cropped_x = torch.stack(cropped_segments)
+    
+    # Interpolate back to the original sequence length
+    # Note: Interpolation requires (N, C, L) format
+    augmented_x = F.interpolate(cropped_x.permute(0, 2, 1), size=seq_len, mode='linear', align_corners=False)
+    
+    return augmented_x.permute(0, 2, 1)
+
 
 class LSTMRRModel(nn.Module):
     def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=64, dropout=0.2):
@@ -53,6 +84,16 @@ class RRLightningModule(pl.LightningModule):
         else:
             raise ValueError(f"Unsupported model name: {model_name}")
         self.time_model = model
+        pretrained_path = cfg.training.get("pretrained_path")
+        if pretrained_path:
+            print(f"Loading pretrained weights from: {pretrained_path}")
+            # Load the saved state dictionary of the encoder
+            pretrained_dict = torch.load(pretrained_path)
+            self.time_model.load_state_dict(pretrained_dict)
+        else:
+            print("Training time_model from scratch.")
+
+
         self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=32)
         if cfg.training.criterion == "MSELoss":
             self.criterion = nn.MSELoss()
@@ -60,7 +101,10 @@ class RRLightningModule(pl.LightningModule):
             self.criterion = nn.L1Loss()
         else:
             raise ValueError(f"Unsupported criterion: {cfg.training.criterion}")
+        
+
     
+
     def forward(self, ppg, freq):
         t = self.time_model(ppg)
         f = self.freq_model(freq)    # (B, 32)
@@ -202,3 +246,114 @@ class RRLightningModule(pl.LightningModule):
             }
         else:       
             return optimizer
+        
+
+
+
+class SSLPretrainModule(pl.LightningModule):
+
+    def __init__(self, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
+        super().__init__()
+        self.save_hyperparameters()
+
+
+        self.encoder = LSTMRRModel(output_size=64)
+
+        self.projection_head = nn.Sequential(
+            nn.Linear(64, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64)
+        )
+
+    
+    def forward(self, x):
+        return self.encoder(x)
+    
+
+    def info_nce_loss(self, features, temperature):
+        # Create labels that identify positive pairs
+        labels = torch.cat([torch.arange(features.shape[0] // 2) for _ in range(2)], dim=0)
+        labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+        labels = labels.to(self.device)
+
+        # Normalize features
+        features = F.normalize(features, dim=1)
+        
+        # Calculate cosine similarity matrix
+        similarity_matrix = torch.matmul(features, features.T)
+        
+        # Discard self-similarity from the matrix
+        mask = torch.eye(labels.shape[0], dtype=torch.bool).to(self.device)
+        labels = labels[~mask].view(labels.shape[0], -1)
+        similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+        
+        # Select positive similarities
+        positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+        
+        # Select negative similarities
+        negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+        
+        logits = torch.cat([positives, negatives], dim=1)
+        # The first column (0) corresponds to the positive pair
+        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
+        
+        logits = logits / temperature
+        return F.cross_entropy(logits, labels)
+    
+    def _shared_step(self, batch):
+        """
+        A shared step for training, validation, and testing to avoid code duplication.
+        """
+        # In SSL, we only need the PPG signal from the batch
+        ppg, _, _ = batch
+
+        # Create two augmented views of the input PPG
+        # NOTE: It's important that augmentation is applied here to get different views
+        # even for the validation and test sets.
+        view1 = ppg_augmentation(ppg)
+        view2 = ppg_augmentation(ppg)
+
+        # Get embeddings from the encoder
+        h1 = self.encoder(view1)
+        h2 = self.encoder(view2)
+
+        # Get projections from the projection head
+        z1 = self.projection_head(h1)
+        z2 = self.projection_head(h2)
+
+        # Concatenate projections for loss calculation
+        features = torch.cat([z1, z2], dim=0)
+
+        # Calculate contrastive loss
+        loss = self.info_nce_loss(features, self.hparams.temperature)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        loss = self._shared_step(batch)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss = self._shared_step(batch)
+        # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        loss = self._shared_step(batch)
+        # Log the test loss.
+        self.log('test_loss', loss, on_epoch=True)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.trainer.max_epochs,
+            eta_min=0
+        )
+        return [optimizer], [scheduler]
