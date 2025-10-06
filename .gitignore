@@ -3,3 +3,9 @@
 /outputs/
 src/__pycache__/
 .DS_Store
+src/outputs/
+/checkpoints/
+/logs/
+/profiles/
+/lightning_logs/
+/fold_*
