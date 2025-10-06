@@ -30,3 +30,6 @@ logging:
 hardware:
   devices: 1
   precision: 32
+
+mode:
+  optuna: False

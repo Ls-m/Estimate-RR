@@ -951,30 +951,30 @@ def train(cfg, cv_splits, processed_data):
         data_module = PPGRRDataModule(train_dataset, val_dataset, test_dataset, batch_size=batch_size, num_workers=num_workers)
         logger.info(f"train dataset shape is {train_dataset[0][0].shape}")
 
+        if cfg.mode.optuna:
+            study = optuna.create_study(
+                direction="minimize",
+                pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=5)
+            )
 
-        study = optuna.create_study(
-            direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=5)
-        )
+            # Optimize
+            study.optimize(lambda trial: objective(trial, cfg, fold_data), n_trials=3)
 
-        # Optimize
-        study.optimize(lambda trial: objective(trial, cfg, fold_data), n_trials=3)
+            # Print best params
+            print("Best hyperparameters:", study.best_params)
+            print("Best value:", study.best_value)
 
-        # Print best params
-        print("Best hyperparameters:", study.best_params)
-        print("Best value:", study.best_value)
+            # Optional: Save as JSON (from previous)
+            
+            best_results = {
+                "best_params": study.best_params,
+                "best_value": study.best_value,
+                "n_trials": len(study.trials)
+            }
+            with open("best_hparams.json", "w") as f:
+                json.dump(best_results, f, indent=4, default=str)
 
-        # Optional: Save as JSON (from previous)
-        
-        best_results = {
-            "best_params": study.best_params,
-            "best_value": study.best_value,
-            "n_trials": len(study.trials)
-        }
-        with open("best_hparams.json", "w") as f:
-            json.dump(best_results, f, indent=4, default=str)
-
-        exit()
+            exit()
 
 
         logger.info(f"[Fold {fold_id}] Starting SSL Pre-training...")
@@ -1005,7 +1005,7 @@ def train(cfg, cv_splits, processed_data):
         )
         progress_bar = TQDMProgressBar(leave=True)
 
-        ssl_model = SSLPretrainModule()
+        ssl_model = SSLPretrainModule(cfg)
         ssl_trainer = pl.Trainer(
             max_epochs=1,
             accelerator="auto",

@@ -3,6 +3,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from pytorch_lightning import LightningDataModule
+from rwkv import RWKVRRModel
 
 
 
@@ -82,6 +83,8 @@ class RRLightningModule(pl.LightningModule):
         model_name = cfg.training.model_name
         if model_name == "LSTMRR":
             model = LSTMRRModel()
+        elif model_name == "RWKV":
+            model = RWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
         else:
             raise ValueError(f"Unsupported model name: {model_name}")
         self.time_model = model
@@ -253,12 +256,14 @@ class RRLightningModule(pl.LightningModule):
 
 class SSLPretrainModule(pl.LightningModule):
 
-    def __init__(self, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
+    def __init__(self, cfg, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
         super().__init__()
         self.save_hyperparameters()
 
-
-        self.encoder = LSTMRRModel(output_size=64)
+        if cfg.training.model_name == "LSTMRR":
+            self.encoder = LSTMRRModel(output_size=64)
+        elif cfg.training.model_name == "RWKV":
+            self.encoder = RWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
 
         self.projection_head = nn.Sequential(
             nn.Linear(64, 128),
