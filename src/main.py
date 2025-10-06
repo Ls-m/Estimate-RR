@@ -10,7 +10,7 @@ from scipy.signal import welch,spectrogram, find_peaks
 from sklearn.preprocessing import StandardScaler
 from scipy.interpolate import interp1d
 from dataset import PPGRRDataset, PPGRRDataModule
-from model import RRLightningModule
+from model import RRLightningModule, SSLPretrainModule
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -18,8 +18,10 @@ import time
 from pytorch_lightning.profilers import SimpleProfiler
 from tqdm import tqdm
 import pywt
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, cpu_count
 import multiprocessing
+import torch
+from pytorch_lightning.callbacks.progress import TQDMProgressBar
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -751,7 +753,8 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         )
         
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
-        freq_segments = compute_freq_features(ppg_segments, original_rate)
+        n_jobs = max(1, cpu_count() - 1)
+        freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
         # check_freq_features(freq_segments, rr_segments, subject_id)
         # processed_data.append({
         #     "subject_id": subject_id,
@@ -932,6 +935,9 @@ def train(cfg, cv_splits, processed_data):
 
     all_fold_results = []
     for cv_split in cv_splits:
+        fold_id = cv_split["fold_id"]
+        logger.info(f"--- Starting Fold {fold_id} ---")
+
         fold_data = create_data_splits(cv_split, processed_data)
         train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'])
         val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'])
@@ -941,6 +947,63 @@ def train(cfg, cv_splits, processed_data):
         num_workers = cfg.training.num_workers
         data_module = PPGRRDataModule(train_dataset, val_dataset, test_dataset, batch_size=batch_size, num_workers=num_workers)
         logger.info(f"train dataset shape is {train_dataset[0][0].shape}")
+
+
+        logger.info(f"[Fold {fold_id}] Starting SSL Pre-training...")
+
+        # 1. Setup Logger for the SSL phase
+        ssl_logger = TensorBoardLogger(
+            save_dir=cfg.logging.log_dir,
+            name=cfg.logging.experiment_name,
+            version=f'fold_{cv_split["fold_id"]}_ssl' # Appending '_ssl' to differentiate logs
+        )
+
+        # 2. Setup Callbacks for the SSL phase
+        # This will save the model with the best validation loss
+        ssl_checkpoint_callback = ModelCheckpoint(
+            monitor='val_loss',
+            dirpath=ssl_logger.log_dir, # Save checkpoints in the same folder as logs
+            filename='ssl-best-checkpoint',
+            save_top_k=1,
+            mode='min'
+        )
+
+        # This will stop training if the validation loss doesn't improve for 5 epochs
+        ssl_early_stopping_callback = EarlyStopping(
+            monitor='val_loss',
+            patience=5, # Number of epochs with no improvement after which training will be stopped.
+            verbose=True,
+            mode='min'
+        )
+        progress_bar = TQDMProgressBar(leave=True)
+
+        ssl_model = SSLPretrainModule()
+        ssl_trainer = pl.Trainer(
+            max_epochs=1,
+            accelerator="auto",
+            devices=cfg.hardware.devices,
+            logger=ssl_logger,
+            log_every_n_steps=1,
+            callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
+        )
+        # Start pre-training
+        ssl_trainer.fit(ssl_model, datamodule=data_module)
+        
+        logger.info(f"Loading best SSL model from checkpoint: {ssl_checkpoint_callback.best_model_path}")
+        # Load the full SSLPretrainModule from the best checkpoint
+        best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
+
+        # The state_dict of the SSL module contains both encoder and projection_head
+        # We only want the encoder.
+        # Save the encoder's weights to the path specified in the config
+        pretrained_path = f"fold_{fold_id}_encoder.pth"
+        torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+        logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
+
+
+        logger.info(f"[Fold {fold_id}] Starting Supervised Fine-tuning...")
+        cfg.training.pretrained_path = pretrained_path
+
         callbacks = setup_callbacks(cfg)
         # Setup logger
         tblogger = TensorBoardLogger(
@@ -949,15 +1012,15 @@ def train(cfg, cv_splits, processed_data):
             version=f'fold_{cv_split["fold_id"]}'
         )
 
-        profiler = SimpleProfiler(dirpath="profiles", filename="profiler_summary.txt")  # Saves to file
+        profiler = SimpleProfiler(dirpath=f"profiles/fold_{fold_id}", filename="profiler_summary.txt")  # Saves to file
 
-        trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
+        fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
                              callbacks=callbacks,
                              logger=tblogger,
                              enable_progress_bar=True,
-                             log_every_n_steps=5,
+                             log_every_n_steps=1,
                              gradient_clip_val=cfg.training.gradient_clip_val,
                              accumulate_grad_batches=1,
                              profiler=profiler,
@@ -965,18 +1028,18 @@ def train(cfg, cv_splits, processed_data):
                              )
         model = RRLightningModule(cfg)
         
-        trainer.fit(model, data_module)
+        fine_tune_trainer.fit(model, data_module)
         # Write profiler summary to file
         os.makedirs("profiles", exist_ok=True)
         summary = profiler.summary()
         with open("profiles/profiler_summary.txt", "w") as f:
             f.write(summary)
-        test_reults = trainer.test(model, datamodule=data_module, ckpt_path="best")
+        test_reults = fine_tune_trainer.test(model, datamodule=data_module, ckpt_path="best")
         all_fold_results.append({
-            "fold_id": cv_split["fold_id"],
+            "fold_id": fold_id,
             "test_results": test_reults[0]
         })
-        logger.info(f"Completed training for fold {cv_split['fold_id']}. Test results: {test_reults}")
+        logger.info(f"Completed training for fold {fold_id}. Test results: {test_reults}")
 
     return all_fold_results
 
