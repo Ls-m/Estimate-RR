@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torch.nn.functional as F
 from pytorch_lightning import LightningDataModule
 from rwkv import RWKVRRModel
-
+from rwkv2 import RWKVTimeModel
 
 
 def ppg_augmentation(x, crop_ratio=0.8):
@@ -85,6 +85,8 @@ class RRLightningModule(pl.LightningModule):
             model = LSTMRRModel()
         elif model_name == "RWKV":
             model = RWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
+        elif model_name == "RWKVTime":
+            model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
         else:
             raise ValueError(f"Unsupported model name: {model_name}")
         self.time_model = model
@@ -264,6 +266,8 @@ class SSLPretrainModule(pl.LightningModule):
             self.encoder = LSTMRRModel(output_size=64)
         elif cfg.training.model_name == "RWKV":
             self.encoder = RWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
+        elif cfg.training.model_name == "RWKVTime":
+            self.encoder = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
 
         self.projection_head = nn.Sequential(
             nn.Linear(64, 128),
