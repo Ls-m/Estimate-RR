@@ -132,7 +132,7 @@ class RRLightningModule(pl.LightningModule):
 
         # Store outputs for epoch-end calculations
         self.training_step_outputs.append({
-            'train_loss': loss,
+            'train_loss': loss.detach().cpu(),
             'pred': rr_pred.detach().cpu(),
             'target': rr.detach().cpu()
         })
@@ -148,8 +148,8 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.training_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('train_loss_epoch', avg_loss, prog_bar=False, sync_dist=True)
-        self.log('train_mae', mae, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('train_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+        self.log('train_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
         self.training_step_outputs.clear()
@@ -163,7 +163,7 @@ class RRLightningModule(pl.LightningModule):
 
         # Store outputs for epoch-end calculations
         self.validation_step_outputs.append({
-            'val_loss': loss,
+            'val_loss': loss.detach().cpu(),
             'pred': rr_pred.detach().cpu(),
             'target': rr.detach().cpu()
         })
@@ -178,8 +178,8 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.validation_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('val_loss_epoch', avg_loss, prog_bar=False, sync_dist=True)
-        self.log('val_mae', mae, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('val_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+        self.log('val_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
         self.validation_step_outputs.clear()
@@ -194,7 +194,7 @@ class RRLightningModule(pl.LightningModule):
 
         # Store outputs for epoch-end calculations
         self.test_step_outputs.append({
-            'test_loss': loss,
+            'test_loss': loss.detach().cpu(),
             'pred': rr_pred.detach().cpu(),
             'target': rr.detach().cpu()
         })
@@ -212,8 +212,8 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.test_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('test_loss_epoch', avg_loss, prog_bar=False, sync_dist=True)
-        self.log('test_mae', mae, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('test_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+        self.log('test_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
         self.test_step_outputs.clear()
