@@ -22,6 +22,8 @@ training:
   n_freq_bins: 25 # Number of frequency bins for frequency-domain features
   pretrained_path: "pretrained_lstm_encoder.pth" # Path to save/load pretrained encoder weights
   ablation_mode: fusion # Ablation mode options: ["fusion", "time_only", "freq_only"]
+  time_model_output_dim: 64
+  freq_model_output_dim: 32
 
 
 logging:
