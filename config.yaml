@@ -7,12 +7,12 @@ preprocessing:
 
 
 training:
-  model_name: "LSTMRR" # Model architecture to use
+  model_name: "LSTMRR" # Model architecture to use options: ["LSTMRR", "RWKV"]
   batch_size: 64 # Batch size for training
   learning_rate: 5e-4 # Learning rate for the optimizer
   optimizer: "adamw" # Optimizer type
   weight_decay: 1e-4 # Weight decay for regularization
-  scheduler: "reduce_on_plateau" # Learning rate scheduler type
+  scheduler: "reduce_on_plateau" # Learning rate scheduler type options: ["step", "reduce_on_plateau", "cosine_annealing"]
   max_epochs: 1 # Maximum number of training epochs
   num_workers: 4 # Number of workers for data loading
   criterion: "MSELoss" # Loss function
@@ -33,3 +33,7 @@ hardware:
 
 mode:
   optuna: False
+
+
+ssl:
+  max_epochs: 1
