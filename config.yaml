@@ -21,6 +21,7 @@ training:
   gradient_clip_val: 1.0 # Gradient clipping value
   n_freq_bins: 25 # Number of frequency bins for frequency-domain features
   pretrained_path: "pretrained_lstm_encoder.pth" # Path to save/load pretrained encoder weights
+  ablation_mode: fusion # Ablation mode options: ["fusion", "time_only", "freq_only"]
 
 
 logging:

@@ -72,8 +72,19 @@ class RRLightningModule(pl.LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.test_step_outputs = []
+        self.ablation_mode = cfg.training.ablation_mode
 
-        fusion_dim = 64 + 32
+        print(f"Running ablation mode: {self.ablation_mode}")
+
+
+        if self.ablation_mode == "fusion":
+            fusion_dim = 64 + 32
+        elif self.ablation_mode == "time_only":
+            fusion_dim = 64
+        elif self.ablation_mode == "freq_only":
+            fusion_dim = 32
+        else:
+            raise ValueError(f"Unsupported ablation mode: {self.ablation_mode}")
         self.head = nn.Sequential(
             nn.Linear(fusion_dim, 64),
             nn.ReLU(),
@@ -115,10 +126,18 @@ class RRLightningModule(pl.LightningModule):
     
 
     def forward(self, ppg, freq):
-        t = self.time_model(ppg)
-        f = self.freq_model(freq)    # (B, 32)
-        z = torch.cat([t, f], dim=1)
-        # print("------------- z shape:", z.shape)
+        if self.ablation_mode == "fusion":
+            t = self.time_model(ppg)
+            f = self.freq_model(freq)    # (B, 32)
+            z = torch.cat([t, f], dim=1)
+            # print("------------- z shape:", z.shape)
+        elif self.ablation_mode == "time_only":
+            z = self.time_model(ppg)
+        elif self.ablation_mode == "freq_only":
+            z = self.freq_model(freq)
+        else:
+            raise ValueError(f"Unsupported ablation mode: {self.ablation_mode}")
+        
         out = self.head(z).squeeze(-1)   # (B,)
         return out
  
