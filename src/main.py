@@ -1007,7 +1007,7 @@ def train(cfg, cv_splits, processed_data):
 
         ssl_model = SSLPretrainModule(cfg)
         ssl_trainer = pl.Trainer(
-            max_epochs=1,
+            max_epochs=cfg.ssl.max_epochs,
             accelerator="auto",
             devices=cfg.hardware.devices,
             logger=ssl_logger,
