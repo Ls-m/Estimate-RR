@@ -128,7 +128,7 @@ class RRLightningModule(pl.LightningModule):
         rr_pred = self.forward(ppg, freq)
         rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Store outputs for epoch-end calculations
         self.training_step_outputs.append({
@@ -148,8 +148,8 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.training_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('train_loss_epoch', avg_loss, prog_bar=False)
-        self.log('train_mae', mae, on_epoch=True, prog_bar=True)
+        self.log('train_loss_epoch', avg_loss, prog_bar=False, sync_dist=True)
+        self.log('train_mae', mae, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
         self.training_step_outputs.clear()
@@ -159,7 +159,7 @@ class RRLightningModule(pl.LightningModule):
         rr_pred = self.forward(ppg, freq)
         rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
-        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Store outputs for epoch-end calculations
         self.validation_step_outputs.append({
@@ -178,8 +178,8 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.validation_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('val_loss_epoch', avg_loss, prog_bar=False)
-        self.log('val_mae', mae, on_epoch=True, prog_bar=True)
+        self.log('val_loss_epoch', avg_loss, prog_bar=False, sync_dist=True)
+        self.log('val_mae', mae, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
         self.validation_step_outputs.clear()
@@ -190,7 +190,7 @@ class RRLightningModule(pl.LightningModule):
         rr_pred = self.forward(ppg, freq)
         rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
-        self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Store outputs for epoch-end calculations
         self.test_step_outputs.append({
@@ -200,7 +200,7 @@ class RRLightningModule(pl.LightningModule):
         })
 
         current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
-        self.log("lr", current_lr, on_step=True, prog_bar=True)
+        self.log("lr", current_lr, on_step=True, prog_bar=True, sync_dist=True)
         
         return loss
     
@@ -212,8 +212,8 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.test_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('test_loss_epoch', avg_loss, prog_bar=False)
-        self.log('test_mae', mae, on_epoch=True, prog_bar=True)
+        self.log('test_loss_epoch', avg_loss, prog_bar=False, sync_dist=True)
+        self.log('test_mae', mae, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
         self.test_step_outputs.clear()
@@ -345,19 +345,19 @@ class SSLPretrainModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self._shared_step(batch)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self._shared_step(batch)
         # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
-        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
 
     def test_step(self, batch, batch_idx):
         loss = self._shared_step(batch)
         # Log the test loss.
-        self.log('test_loss', loss, on_epoch=True)
+        self.log('test_loss', loss, on_epoch=True, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
