@@ -74,17 +74,40 @@ class RRLightningModule(pl.LightningModule):
         self.test_step_outputs = []
         self.ablation_mode = cfg.training.ablation_mode
 
-        print(f"Running ablation mode: {self.ablation_mode}")
+        print(f"---------- Initializing with Ablation Mode: {self.ablation_mode} ----------")
 
+        self.time_model = None
+        self.freq_model = None
+        fusion_dim = 0
 
-        if self.ablation_mode == "fusion":
-            fusion_dim = 64 + 32
-        elif self.ablation_mode == "time_only":
-            fusion_dim = 64
-        elif self.ablation_mode == "freq_only":
-            fusion_dim = 32
-        else:
-            raise ValueError(f"Unsupported ablation mode: {self.ablation_mode}")
+        if self.ablation_mode in ["fusion", "time_only"]:
+            model_name = cfg.training.model_name
+            if model_name == "LSTMRR":
+                model = LSTMRRModel()
+            elif model_name == "RWKV":
+                model = RWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
+            elif model_name == "RWKVTime":
+                model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
+            # elif model_name == "RWKVTimeOPT":
+            #     model = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
+            else:
+                raise ValueError(f"Unsupported model name: {model_name}")
+            self.time_model = model
+            fusion_dim += self.cfg.time_model_output_dim
+            pretrained_path = cfg.training.get("pretrained_path")
+            if pretrained_path:
+                print(f"Loading pretrained weights for time_model from: {pretrained_path}")
+                # Load the saved state dictionary of the encoder
+                pretrained_dict = torch.load(pretrained_path)
+                self.time_model.load_state_dict(pretrained_dict)
+            else:
+                print("Training time_model from scratch.")
+
+        if self.ablation_mode in ["fusion", "freq_only"]:
+            self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
+            fusion_dim += self.cfg.freq_model_output_dim
+
+        
         self.head = nn.Sequential(
             nn.Linear(fusion_dim, 64),
             nn.ReLU(),
@@ -92,29 +115,6 @@ class RRLightningModule(pl.LightningModule):
             nn.Linear(64, 1)
         )
 
-        model_name = cfg.training.model_name
-        if model_name == "LSTMRR":
-            model = LSTMRRModel()
-        elif model_name == "RWKV":
-            model = RWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
-        elif model_name == "RWKVTime":
-            model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
-        # elif model_name == "RWKVTimeOPT":
-        #     model = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
-        else:
-            raise ValueError(f"Unsupported model name: {model_name}")
-        self.time_model = model
-        pretrained_path = cfg.training.get("pretrained_path")
-        if pretrained_path:
-            print(f"Loading pretrained weights from: {pretrained_path}")
-            # Load the saved state dictionary of the encoder
-            pretrained_dict = torch.load(pretrained_path)
-            self.time_model.load_state_dict(pretrained_dict)
-        else:
-            print("Training time_model from scratch.")
-
-
-        self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=32)
         if cfg.training.criterion == "MSELoss":
             self.criterion = nn.MSELoss()
         elif cfg.training.criterion == "L1Loss":
@@ -126,17 +126,14 @@ class RRLightningModule(pl.LightningModule):
     
 
     def forward(self, ppg, freq):
-        if self.ablation_mode == "fusion":
-            t = self.time_model(ppg)
-            f = self.freq_model(freq)    # (B, 32)
-            z = torch.cat([t, f], dim=1)
-            # print("------------- z shape:", z.shape)
-        elif self.ablation_mode == "time_only":
-            z = self.time_model(ppg)
-        elif self.ablation_mode == "freq_only":
-            z = self.freq_model(freq)
-        else:
-            raise ValueError(f"Unsupported ablation mode: {self.ablation_mode}")
+        features = []
+        if self.time_model is not None:
+            features.append(self.time_model(ppg))
+
+        if self.freq_model is not None:
+            features.append(self.freq_model(freq))
+            
+        z = torch.cat(features, dim=1)  # (B, fusion_dim)
         
         out = self.head(z).squeeze(-1)   # (B,)
         return out

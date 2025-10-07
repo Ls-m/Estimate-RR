@@ -938,6 +938,7 @@ def train(cfg, cv_splits, processed_data):
 
     all_fold_results = []
     for cv_split in cv_splits:
+        
         fold_id = cv_split["fold_id"]
         logger.info(f"--- Starting Fold {fold_id} ---")
 
@@ -976,62 +977,60 @@ def train(cfg, cv_splits, processed_data):
 
             exit()
 
+        if cfg.training.ablation_mode in ["fusion", "time_only"]:
+            logger.info(f"[Fold {fold_id}] Starting SSL Pre-training for mode '{cfg.training.ablation_mode}'...")
+            # 1. Setup Logger for the SSL phase
+            ssl_logger = TensorBoardLogger(
+                save_dir=cfg.logging.log_dir,
+                name=cfg.logging.experiment_name,
+                version=f'fold_{cv_split["fold_id"]}_ssl' # Appending '_ssl' to differentiate logs
+            )
 
-        logger.info(f"[Fold {fold_id}] Starting SSL Pre-training...")
+            # 2. Setup Callbacks for the SSL phase
+            # This will save the model with the best validation loss
+            ssl_checkpoint_callback = ModelCheckpoint(
+                monitor='val_loss',
+                dirpath=ssl_logger.log_dir, # Save checkpoints in the same folder as logs
+                filename='ssl-best-checkpoint',
+                save_top_k=1,
+                mode='min'
+            )
 
-        # 1. Setup Logger for the SSL phase
-        ssl_logger = TensorBoardLogger(
-            save_dir=cfg.logging.log_dir,
-            name=cfg.logging.experiment_name,
-            version=f'fold_{cv_split["fold_id"]}_ssl' # Appending '_ssl' to differentiate logs
-        )
+            # This will stop training if the validation loss doesn't improve for 5 epochs
+            ssl_early_stopping_callback = EarlyStopping(
+                monitor='val_loss',
+                patience=5, # Number of epochs with no improvement after which training will be stopped.
+                verbose=True,
+                mode='min'
+            )
+            progress_bar = TQDMProgressBar(leave=True)
 
-        # 2. Setup Callbacks for the SSL phase
-        # This will save the model with the best validation loss
-        ssl_checkpoint_callback = ModelCheckpoint(
-            monitor='val_loss',
-            dirpath=ssl_logger.log_dir, # Save checkpoints in the same folder as logs
-            filename='ssl-best-checkpoint',
-            save_top_k=1,
-            mode='min'
-        )
-
-        # This will stop training if the validation loss doesn't improve for 5 epochs
-        ssl_early_stopping_callback = EarlyStopping(
-            monitor='val_loss',
-            patience=5, # Number of epochs with no improvement after which training will be stopped.
-            verbose=True,
-            mode='min'
-        )
-        progress_bar = TQDMProgressBar(leave=True)
-
-        ssl_model = SSLPretrainModule(cfg)
-        ssl_trainer = pl.Trainer(
-            max_epochs=cfg.ssl.max_epochs,
-            accelerator="auto",
-            devices=cfg.hardware.devices,
-            strategy="ddp",
-            logger=ssl_logger,
-            log_every_n_steps=1,
-            callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
-        )
-        # Start pre-training
-        ssl_trainer.fit(ssl_model, datamodule=data_module)
+            ssl_model = SSLPretrainModule(cfg)
+            ssl_trainer = pl.Trainer(
+                max_epochs=cfg.ssl.max_epochs,
+                accelerator="auto",
+                devices=cfg.hardware.devices,
+                strategy="auto",
+                logger=ssl_logger,
+                log_every_n_steps=1,
+                callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
+            )
+            # Start pre-training
+            ssl_trainer.fit(ssl_model, datamodule=data_module)
+            best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
+            pretrained_path = f"fold_{fold_id}_encoder.pth"
+            torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+            logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
+            # Set the path in the config for the fine-tuning stage
+            cfg.training.pretrained_path = pretrained_path
         
-        logger.info(f"Loading best SSL model from checkpoint: {ssl_checkpoint_callback.best_model_path}")
-        # Load the full SSLPretrainModule from the best checkpoint
-        best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
+        else:
+            logger.info(f"[Fold {fold_id}] Skipping SSL Pre-training for mode '{cfg.training.ablation_mode}'.")
+            # Ensure the path is not set from a previous run
+            cfg.training.pretrained_path = None
 
-        # The state_dict of the SSL module contains both encoder and projection_head
-        # We only want the encoder.
-        # Save the encoder's weights to the path specified in the config
-        pretrained_path = f"fold_{fold_id}_encoder.pth"
-        torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
-        logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
-
-
+         # --- The fine-tuning stage proceeds from here ---
         logger.info(f"[Fold {fold_id}] Starting Supervised Fine-tuning...")
-        cfg.training.pretrained_path = pretrained_path
 
         callbacks = setup_callbacks(cfg)
         # Setup logger
@@ -1046,7 +1045,7 @@ def train(cfg, cv_splits, processed_data):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy="ddp",
+                             strategy="auto",
                              callbacks=callbacks,
                              logger=tblogger,
                              enable_progress_bar=True,
