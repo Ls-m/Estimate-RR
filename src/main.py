@@ -1010,6 +1010,7 @@ def train(cfg, cv_splits, processed_data):
             max_epochs=cfg.ssl.max_epochs,
             accelerator="auto",
             devices=cfg.hardware.devices,
+            strategy="ddp",
             logger=ssl_logger,
             log_every_n_steps=1,
             callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
@@ -1045,6 +1046,7 @@ def train(cfg, cv_splits, processed_data):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
+                             strategy="ddp",
                              callbacks=callbacks,
                              logger=tblogger,
                              enable_progress_bar=True,
