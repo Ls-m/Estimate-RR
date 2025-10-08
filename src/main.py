@@ -715,21 +715,26 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
 
         check_effect = False
         
-        _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
-        if merged_segments:
-            ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
-            expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
-            ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
-            rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
+        if cfg.preprocessing.use_denoiser:
+            logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
+            _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
+            if merged_segments:
+                ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
+                expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
+                ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
+                rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
+            else:
+                logger.info(f"for this subject {i} there is no noise detected!")
+                expanded_removed_segments = []
+                ppg_denoised = ppg
+                rr_labels_denoised = rr
         else:
-            logger.info(f"for this subject {i} there is no noise detected!")
-            expanded_removed_segments = []
+            # This is the ablation path: the denoiser is skipped entirely.
+            logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
             ppg_denoised = ppg
             rr_labels_denoised = rr
-        # logger.info(f"type raw ppg: {type(ppg)}")
-        # logger.info(f"type ppg_denoised: {type(ppg_denoised)}")
-        # logger.info(f"raw_ppg[615:700]: {ppg[615:700]}")
-        # logger.info(f"ppg_denoised[615:700]: {ppg_denoised[615:700]}")
+            expanded_removed_segments = []
+        
         ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
         if np.any(np.isnan(ppg_filtered)):
             logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
@@ -938,7 +943,7 @@ def train(cfg, cv_splits, processed_data):
 
     all_fold_results = []
     for cv_split in cv_splits:
-        
+
         fold_id = cv_split["fold_id"]
         logger.info(f"--- Starting Fold {fold_id} ---")
 
