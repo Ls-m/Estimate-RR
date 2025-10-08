@@ -25,6 +25,7 @@ from pytorch_lightning.callbacks.progress import TQDMProgressBar
 import optuna
 from my_optuna import objective
 import json
+from pytorch_lightning.strategies import DDPStrategy
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -1046,11 +1047,11 @@ def train(cfg, cv_splits, processed_data):
         )
 
         profiler = SimpleProfiler(dirpath=f"profiles/fold_{fold_id}", filename="profiler_summary.txt")  # Saves to file
-
+        ddp_strategy = DDPStrategy(find_unused_parameters=True)
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy="auto",
+                             strategy=ddp_strategy,
                              callbacks=callbacks,
                              logger=tblogger,
                              enable_progress_bar=True,
