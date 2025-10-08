@@ -3,6 +3,13 @@ import torch.nn as nn
 from torch.utils.cpp_extension import load
 import os
 
+
+conda_env_path = os.getenv("CONDA_PREFIX")
+
+# Check if CUDA_HOME is already set, if not, set it to the conda env path
+if "CUDA_HOME" not in os.environ and conda_env_path:
+    print(f"Setting CUDA_HOME to: {conda_env_path}")
+    os.environ["CUDA_HOME"] = conda_env_path
 # --- Step 1: Compile the CUDA Kernel On-the-Fly ---
 # This will compile the kernel the first time it's run and cache it.
 # Make sure the paths to your .cpp and .cu files are correct.
