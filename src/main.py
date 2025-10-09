@@ -1047,11 +1047,11 @@ def train(cfg, cv_splits, processed_data):
         )
 
         profiler = SimpleProfiler(dirpath=f"profiles/fold_{fold_id}", filename="profiler_summary.txt")  # Saves to file
-        ddp_strategy = DDPStrategy(find_unused_parameters=True)
+        ddp_strategy = DDPStrategy(find_unused_parameters=False)
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy="ddp_find_unused_parameters_true",
+                             strategy=ddp_strategy,
                              callbacks=callbacks,
                              logger=tblogger,
                              enable_progress_bar=True,
