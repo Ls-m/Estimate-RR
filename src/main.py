@@ -1016,7 +1016,7 @@ def train(cfg, cv_splits, processed_data):
                 max_epochs=cfg.ssl.max_epochs,
                 accelerator="auto",
                 devices=cfg.hardware.devices,
-                strategy="auto",
+                strategy='ddp_find_unused_parameters_true',
                 logger=ssl_logger,
                 log_every_n_steps=1,
                 callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
