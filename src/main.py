@@ -1051,7 +1051,7 @@ def train(cfg, cv_splits, processed_data):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy=ddp_strategy,
+                             strategy="ddp_find_unused_parameters_true",
                              callbacks=callbacks,
                              logger=tblogger,
                              enable_progress_bar=True,
