@@ -144,6 +144,8 @@ class RRLightningModule(pl.LightningModule):
         rr_pred = self.forward(ppg, freq)
         rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
+        current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
+        self.log("lr", current_lr, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Store outputs for epoch-end calculations
@@ -214,9 +216,6 @@ class RRLightningModule(pl.LightningModule):
             'pred': rr_pred.detach().cpu(),
             'target': rr.detach().cpu()
         })
-
-        current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
-        self.log("lr", current_lr, on_step=True, prog_bar=True, sync_dist=True)
         
         return loss
     
