@@ -252,7 +252,7 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "ReduceLROnPlateau":
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=2)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
@@ -261,11 +261,13 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "CosineAnnealingLR":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-6)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
                     'scheduler': scheduler,
+                    'interval': 'epoch', # Make sure it updates every epoch
+                    'frequency': 1,
                 }
             }
         else:       
