@@ -984,53 +984,61 @@ def train(cfg, cv_splits, processed_data):
             exit()
 
         if cfg.training.ablation_mode in ["fusion", "time_only"]:
-            logger.info(f"[Fold {fold_id}] Starting SSL Pre-training for mode '{cfg.training.ablation_mode}'...")
-            # 1. Setup Logger for the SSL phase
-            ssl_logger = TensorBoardLogger(
-                save_dir=cfg.logging.log_dir,
-                name=cfg.logging.experiment_name,
-                version=f'fold_{cv_split["fold_id"]}_ssl' # Appending '_ssl' to differentiate logs
-            )
+            # Second, check the new flag to see if we should run SSL
+            if cfg.training.use_ssl_pretraining:
 
-            # 2. Setup Callbacks for the SSL phase
-            # This will save the model with the best validation loss
-            ssl_checkpoint_callback = ModelCheckpoint(
-                monitor='val_loss',
-                dirpath=ssl_logger.log_dir, # Save checkpoints in the same folder as logs
-                filename='ssl-best-checkpoint',
-                save_top_k=1,
-                mode='min'
-            )
+                logger.info(f"[Fold {fold_id}] SSL Pre-training: ENABLED.")
+                logger.info(f"[Fold {fold_id}] Starting SSL Pre-training for mode '{cfg.training.ablation_mode}'...")
+                # 1. Setup Logger for the SSL phase
+                ssl_logger = TensorBoardLogger(
+                    save_dir=cfg.logging.log_dir,
+                    name=cfg.logging.experiment_name,
+                    version=f'fold_{cv_split["fold_id"]}_ssl' # Appending '_ssl' to differentiate logs
+                )
 
-            # This will stop training if the validation loss doesn't improve for 5 epochs
-            ssl_early_stopping_callback = EarlyStopping(
-                monitor='val_loss',
-                patience=5, # Number of epochs with no improvement after which training will be stopped.
-                verbose=True,
-                mode='min'
-            )
-            progress_bar = TQDMProgressBar(leave=True)
+                # 2. Setup Callbacks for the SSL phase
+                # This will save the model with the best validation loss
+                ssl_checkpoint_callback = ModelCheckpoint(
+                    monitor='val_loss',
+                    dirpath=ssl_logger.log_dir, # Save checkpoints in the same folder as logs
+                    filename='ssl-best-checkpoint',
+                    save_top_k=1,
+                    mode='min'
+                )
 
-            ssl_model = SSLPretrainModule(cfg)
-            ssl_trainer = pl.Trainer(
-                max_epochs=cfg.ssl.max_epochs,
-                accelerator="auto",
-                devices=cfg.hardware.devices,
-                strategy='ddp_find_unused_parameters_true',
-                logger=ssl_logger,
-                log_every_n_steps=1,
-                callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
-            )
-            # Start pre-training
-            ssl_trainer.fit(ssl_model, datamodule=data_module)
-            best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
-            pretrained_path = f"fold_{fold_id}_encoder.pth"
-            torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
-            logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
-            # Set the path in the config for the fine-tuning stage
-            cfg.training.pretrained_path = pretrained_path
+                # This will stop training if the validation loss doesn't improve for 5 epochs
+                ssl_early_stopping_callback = EarlyStopping(
+                    monitor='val_loss',
+                    patience=5, # Number of epochs with no improvement after which training will be stopped.
+                    verbose=True,
+                    mode='min'
+                )
+                progress_bar = TQDMProgressBar(leave=True)
+
+                ssl_model = SSLPretrainModule(cfg)
+                ssl_trainer = pl.Trainer(
+                    max_epochs=cfg.ssl.max_epochs,
+                    accelerator="auto",
+                    devices=cfg.hardware.devices,
+                    # strategy='ddp_find_unused_parameters_true',
+                    logger=ssl_logger,
+                    log_every_n_steps=1,
+                    callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
+                )
+                # Start pre-training
+                ssl_trainer.fit(ssl_model, datamodule=data_module)
+                best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
+                pretrained_path = f"fold_{fold_id}_encoder.pth"
+                torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+                logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
+                # Set the path in the config for the fine-tuning stage
+                cfg.training.pretrained_path = pretrained_path
+            else:
+                # This is the new "ablation" path where we skip SSL
+                logger.info(f"[Fold {fold_id}] SSL Pre-training: DISABLED (Training from scratch).")
+                cfg.training.pretrained_path = None # Ensure no pre-trained model is loaded
         
-        else:
+        else: # This block handles the 'freq_only' case
             logger.info(f"[Fold {fold_id}] Skipping SSL Pre-training for mode '{cfg.training.ablation_mode}'.")
             # Ensure the path is not set from a previous run
             cfg.training.pretrained_path = None
@@ -1051,7 +1059,7 @@ def train(cfg, cv_splits, processed_data):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy='ddp_find_unused_parameters_true',
+                            #  strategy='ddp_find_unused_parameters_true',
                              callbacks=callbacks,
                              logger=tblogger,
                              enable_progress_bar=True,
@@ -1088,8 +1096,8 @@ def main(cfg: DictConfig):
 
 
     print(f"processed data length: {len(processed_data)}")
-    print(f"processed data for subjec")
-
+    print(f"processed data for subjects")
+    
     count_zero = 0
     segment_counts = {}
     for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items():
