@@ -923,16 +923,16 @@ class FirstBatchTimer(pl.Callback):
 # def train_single_fold(fold_data, fold_id):
 def setup_callbacks(cfg):
     checkpoint_callback = ModelCheckpoint(
-        monitor='val_loss',
+        monitor='val_mae',
         dirpath=cfg.training.checkpoint_dir,
-        filename='best-checkpoint-fold{fold_id}-' + '{epoch:02d}-{val_loss:.2f}',
+        filename='best-checkpoint-fold{fold_id}-' + '{epoch:02d}-{val_mae:.2f}',
         save_top_k=1,
         save_last=True,
         mode='min',
         verbose=True
     )
     early_stopping_callback = EarlyStopping(
-        monitor='val_loss',
+        monitor='val_mae',
         patience=cfg.training.early_stopping_patience,
         mode='min',
         min_delta=0.001,
