@@ -238,7 +238,7 @@ class RWKV(nn.Module):
     
 
 class RWKVRRModel(nn.Module):
-    def __init__(self, input_size=1, hidden_size=64, num_layers=3, output_size=64, dropout=0.2):
+    def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=64, dropout=0.2):
         super().__init__()
         self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout=dropout)
         self.fc = nn.Linear(hidden_size, output_size)
