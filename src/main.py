@@ -121,7 +121,7 @@ def read_data(path):
             subjects = load_subjects_bidmc(dataset_path)
             raw_data = load_files_bidmc(dataset_path, subjects)
             print(len(subjects))
-            return raw_data
+            break
             # print(raw_data)
     return raw_data
 
@@ -135,7 +135,7 @@ def read_capnobase_data(path):
             subjects = load_subjects_bidmc(dataset_path)
             raw_data = load_files_capnobase(dataset_path, subjects)
             print(len(subjects))
-            return raw_data
+            break
             # print(raw_data)
     return raw_data
 
