@@ -1097,37 +1097,41 @@ def setup_callbacks(cfg):
 
 
 def extract_all_segments(processed_data_dict):
- 
-    # Initialize empty lists to store segments from all subjects
-    all_ppg = []
-    all_rr = []
-    all_freq = []
+    """
+    Combines all segments from a processed data dictionary into single NumPy arrays.
+    This version is corrected to handle lists of segments from each subject.
+    """
+    # Initialize empty lists to store all segments from all subjects
+    all_ppg_flat = []
+    all_rr_flat = []
+    all_freq_flat = []
 
-    logger.info(f"Extracting segments from {len(processed_data_dict)} subjects...")
+    logger.info(f"Extracting and flattening segments from {len(processed_data_dict)} subjects...")
 
     for subject_id, segments in processed_data_dict.items():
         ppg_segments, rr_segments, freq_segments = segments
         
-        # Important check: only add subjects that have valid segments
         if len(ppg_segments) > 0:
-            all_ppg.append(ppg_segments)
-            all_rr.append(rr_segments)
-            all_freq.append(freq_segments)
+            # <<< FIX: Use .extend() to add all segments to a flat list >>>
+            # Instead of appending a list of segments, we add each segment individually.
+            all_ppg_flat.extend(ppg_segments)
+            all_rr_flat.extend(rr_segments)
+            all_freq_flat.extend(freq_segments)
         else:
             logger.warning(f"Subject {subject_id} has no valid segments, skipping.")
     
-    # Check if any data was collected before trying to concatenate
-    if not all_ppg:
+    if not all_ppg_flat:
         logger.error("No segments found in any subject. Returning empty arrays.")
         return np.array([]), np.array([]), np.array([])
 
-    # Concatenate the lists of arrays into single, large NumPy arrays
-    # axis=0 stacks them along the first dimension (the "batch" dimension)
-    final_ppg = np.concatenate(all_ppg, axis=0)
-    final_rr = np.concatenate(all_rr, axis=0)
-    final_freq = np.concatenate(all_freq, axis=0)
+    # <<< FIX: Use np.array() to stack the list of 1D arrays into a 2D array >>>
+    # This correctly converts a list of (segment_length,) arrays into a single
+    # (num_total_segments, segment_length) array.
+    final_ppg = np.array(all_ppg_flat)
+    final_rr = np.array(all_rr_flat)
+    final_freq = np.array(all_freq_flat)
 
-    logger.info(f"Total combined segments extracted: {len(final_ppg)}")
+    logger.info(f"Total combined segments extracted: {final_ppg.shape[0]}")
 
     return final_ppg, final_rr, final_freq
 
