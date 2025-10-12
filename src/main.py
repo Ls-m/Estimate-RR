@@ -871,32 +871,31 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
 
 
 # This is your new function, dedicated to processing data for SSL
-
 def process_ssl_data(cfg, raw_data):
     processed_data = {}
-    # Assuming CapnoBase subjects are numbered differently, adjust loop as needed
-    for i in range(len(raw_data)): # Example loop, adjust to your data format
-        # For SSL, we only need the PPG signal
-        ppg = raw_data[f"{i:02}"][0] # Adjust key/index as needed
+
+    # <<< FIX: Iterate directly over the dictionary's items (subject_id, data_tuple) >>>
+    for subject_id, data_tuple in raw_data.items():
+        # The first element of the tuple is the ppg signal
+        ppg = data_tuple[0]
         
-        # Determine sampling rate based on dataset
+        # Determine sampling rate based on dataset (adjust if needed)
         original_rate = 125
         
         # --- Denoising (PPG only) ---
         if cfg.preprocessing.use_denoiser:
-            logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
+            logger.info(f"Subject {subject_id}: Running with denoiser ENABLED.")
             _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=False)
             if merged_segments:
                 ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
                 expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
                 ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
             else:
-                logger.info(f"for this subject {i} there is no noise detected!")
+                logger.info(f"for this subject {subject_id} there is no noise detected!")
                 expanded_removed_segments = []
                 ppg_denoised = ppg
         else:
-            # This is the ablation path: the denoiser is skipped entirely.
-            logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
+            logger.info(f"Subject {subject_id}: Running with denoiser DISABLED (Ablation Study).")
             ppg_denoised = ppg
             expanded_removed_segments = []
         
@@ -906,14 +905,14 @@ def process_ssl_data(cfg, raw_data):
             logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
         ppg_cliped, _, _ = remove_outliers(ppg_filtered)
         ppg_normalized = normalize_signal(ppg_cliped)
-
-        subject_id = f"{i:02}" # Use a prefix to avoid ID collision
+        
+        # The subject_id now comes directly from the loop, no need to create it
         
         # --- Use the new SSL segmentation function ---
         ppg_segments, rr_segments = create_ssl_segments(
             subject_id,
             ppg_normalized,
-            original_len=len(ppg), # Use original length for gap handling
+            original_len=len(ppg),
             removed_segments=expanded_removed_segments,
             ppg_fs=original_rate,
             window_size_sec=32,
