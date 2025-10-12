@@ -127,6 +127,7 @@ def read_data(path):
 
 
 def read_capnobase_data(path):
+    raw_data = {}
     for dataset_name in os.listdir(path):
         dataset_path = os.path.join(path,dataset_name)
         if not os.path.isdir(dataset_path):
