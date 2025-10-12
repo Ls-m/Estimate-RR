@@ -1135,39 +1135,79 @@ def extract_all_segments(processed_data_dict):
     return final_ppg, final_rr, final_freq
 
 
-
 def setup_ssl_datamodule(cfg, fold_data, processed_capnobase_ssl, finetune_val_dataset):
     """
     Creates the data module for the SSL pre-training stage.
     Conditionally adds CapnoBase data based on the config.
     """
-    # Start with the BIDMC training data for the current fold
-    ssl_train_ppg = fold_data['train_ppg']
-    ssl_train_rr = fold_data['train_rr']
-    ssl_train_freq = fold_data['train_freq']
+    # Start with the BIDMC training data, which is a list of segments
+    ssl_train_ppg_list = list(fold_data['train_ppg'])
+    ssl_train_rr_list = list(fold_data['train_rr'])
+    ssl_train_freq_list = list(fold_data['train_freq'])
 
     # Conditionally add CapnoBase data if the flag is set
     if cfg.ssl.use_capnobase and processed_capnobase_ssl is not None:
         logger.info("Adding CapnoBase data to the SSL training set.")
-        capnobase_ppg, capnobase_rr, capnobase_freq = extract_all_segments(processed_capnobase_ssl)
         
-        # Combine with the BIDMC fold data
-        ssl_train_ppg = np.concatenate([ssl_train_ppg, capnobase_ppg], axis=0)
-        ssl_train_rr = np.concatenate([ssl_train_rr, capnobase_rr], axis=0)
-        ssl_train_freq = np.concatenate([ssl_train_freq, capnobase_freq], axis=0)
+        # This returns stacked 2D NumPy arrays
+        capnobase_ppg_array, capnobase_rr_array, capnobase_freq_array = extract_all_segments(processed_capnobase_ssl)
+        
+        # <<< FIX: Convert the 2D NumPy arrays back into lists of 1D arrays >>>
+        # Then, extend the original lists with the new data.
+        if capnobase_ppg_array.ndim > 1 and capnobase_ppg_array.shape[0] > 0:
+            ssl_train_ppg_list.extend(list(capnobase_ppg_array))
+            ssl_train_rr_list.extend(list(capnobase_rr_array))
+            ssl_train_freq_list.extend(list(capnobase_freq_array))
+
     else:
         logger.info("Using only BIDMC fold data for SSL training.")
 
-    # Create the final SSL DataModule
-    ssl_train_dataset = PPGRRDataset(ssl_train_ppg, ssl_train_rr, ssl_train_freq)
+    # <<< FIX: Convert the final combined lists into single, stacked NumPy arrays >>>
+    final_ssl_train_ppg = np.array(ssl_train_ppg_list)
+    final_ssl_train_rr = np.array(ssl_train_rr_list)
+    final_ssl_train_freq = np.array(ssl_train_freq_list)
+
+    # Create the final SSL DataModule with the correctly shaped arrays
+    ssl_train_dataset = PPGRRDataset(final_ssl_train_ppg, final_ssl_train_rr, final_ssl_train_freq)
     
-    # It's best practice to validate on the in-domain data (BIDMC validation set)
     ssl_data_module = PPGRRDataModule(
-        ssl_train_dataset, finetune_val_dataset, None, # No test set needed for SSL
+        ssl_train_dataset, finetune_val_dataset, None,
         batch_size=cfg.training.batch_size, 
         num_workers=cfg.training.num_workers
     )
     return ssl_data_module
+# def setup_ssl_datamodule(cfg, fold_data, processed_capnobase_ssl, finetune_val_dataset):
+#     """
+#     Creates the data module for the SSL pre-training stage.
+#     Conditionally adds CapnoBase data based on the config.
+#     """
+#     # Start with the BIDMC training data for the current fold
+#     ssl_train_ppg = fold_data['train_ppg']
+#     ssl_train_rr = fold_data['train_rr']
+#     ssl_train_freq = fold_data['train_freq']
+
+#     # Conditionally add CapnoBase data if the flag is set
+#     if cfg.ssl.use_capnobase and processed_capnobase_ssl is not None:
+#         logger.info("Adding CapnoBase data to the SSL training set.")
+#         capnobase_ppg, capnobase_rr, capnobase_freq = extract_all_segments(processed_capnobase_ssl)
+        
+#         # Combine with the BIDMC fold data
+#         ssl_train_ppg = np.concatenate([ssl_train_ppg, capnobase_ppg], axis=0)
+#         ssl_train_rr = np.concatenate([ssl_train_rr, capnobase_rr], axis=0)
+#         ssl_train_freq = np.concatenate([ssl_train_freq, capnobase_freq], axis=0)
+#     else:
+#         logger.info("Using only BIDMC fold data for SSL training.")
+
+#     # Create the final SSL DataModule
+#     ssl_train_dataset = PPGRRDataset(ssl_train_ppg, ssl_train_rr, ssl_train_freq)
+    
+#     # It's best practice to validate on the in-domain data (BIDMC validation set)
+#     ssl_data_module = PPGRRDataModule(
+#         ssl_train_dataset, finetune_val_dataset, None, # No test set needed for SSL
+#         batch_size=cfg.training.batch_size, 
+#         num_workers=cfg.training.num_workers
+#     )
+#     return ssl_data_module
 
 
 def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
