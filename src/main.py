@@ -41,6 +41,8 @@ def load_subjects_bidmc(path):
             subjects.append(subject_id)
     return subjects
 
+
+
 def load_files_bidmc(path,subjects):
     print(f"subjects are {subjects}")
     raw_data = {}
@@ -88,6 +90,27 @@ def load_files_bidmc(path,subjects):
 
     return raw_data
 
+
+def load_files_capnobase(path,subjects):
+    print(f"subjects are {subjects}")
+    raw_data = {}
+
+    for subject in subjects:
+        signal_file = path+"/bidmc_"+subject+"_Signals.csv"
+        signal_df = pd.read_csv(signal_file) if os.path.exists(signal_file) else None
+        signal_df.columns = signal_df.columns.str.strip()
+        for col in signal_df.columns:
+            signal_df[col] = pd.to_numeric(signal_df[col], errors='coerce')
+        ppg = signal_df["PLETH"].values
+        if np.any(np.isnan(ppg)) or np.any(np.isinf(ppg)):
+            logger.info(f"PPG data contains NaN or Inf values for subject: {subject}")
+        raw_data[subject] = (ppg,)
+        for subject, (ppg,) in raw_data.items():
+            logger.debug(f"for subject {subject} PPG length: {len(ppg)}")
+
+    return raw_data
+
+
 def read_data(path):
     # Code to read data goes here
     for dataset_name in os.listdir(path):
@@ -98,6 +121,21 @@ def read_data(path):
             subjects = load_subjects_bidmc(dataset_path)
             raw_data = load_files_bidmc(dataset_path, subjects)
             print(len(subjects))
+            return raw_data
+            # print(raw_data)
+    return raw_data
+
+
+def read_capnobase_data(path):
+    for dataset_name in os.listdir(path):
+        dataset_path = os.path.join(path,dataset_name)
+        if not os.path.isdir(dataset_path):
+            continue
+        if dataset_name == "capnobase":
+            subjects = load_subjects_bidmc(dataset_path)
+            raw_data = load_files_capnobase(dataset_path, subjects)
+            print(len(subjects))
+            return raw_data
             # print(raw_data)
     return raw_data
 
@@ -611,6 +649,60 @@ def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, origina
     return ppg_segments, final_rr_labels
 
 
+
+# Place this new function in the same file as your other processing functions
+
+def create_ssl_segments(subject_id, ppg_signal, original_len, removed_segments, ppg_fs, 
+                        window_size_sec, step_size_sec):
+    """
+    Creates PPG segments for SSL pre-training. Does not require RR labels.
+    Returns PPG segments and dummy labels.
+    """
+    ppg_segments = []
+    window_samples = window_size_sec * ppg_fs
+    step_samples = step_size_sec * ppg_fs
+
+    # --- Find Continuous Blocks (same logic as before) ---
+    continuous_blocks = [(0, original_len)]
+    if removed_segments:
+        for rem_start, rem_end in removed_segments:
+            new_blocks = []
+            for block_start, block_end in continuous_blocks:
+                if rem_end <= block_start or rem_start >= block_end:
+                    new_blocks.append((block_start, block_end))
+                    continue
+                if rem_start > block_start:
+                    new_blocks.append((block_start, rem_start))
+                if rem_end < block_end:
+                    new_blocks.append((rem_end, block_end))
+            continuous_blocks = new_blocks
+
+    # --- Create Index Mapping for PPG signal (same logic as before) ---
+    keep_mask_ppg = np.ones(original_len, dtype=bool)
+    for start, end in removed_segments:
+        keep_mask_ppg[start:end] = False
+    clean_indices_map_ppg = np.cumsum(keep_mask_ppg) - 1
+
+    # --- Main Segmentation Loop (Simplified) ---
+    for block_start, block_end in continuous_blocks:
+        if block_end - block_start < window_samples:
+            continue
+        for current_pos in range(block_start, block_end - window_samples + 1, step_samples):
+            seg_start_orig = current_pos
+            
+            # Map PPG indices and get segment
+            seg_start_clean = clean_indices_map_ppg[seg_start_orig]
+            seg_end_clean = seg_start_clean + window_samples
+            
+            ppg_segment = ppg_signal[seg_start_clean:seg_end_clean]
+            ppg_segments.append(ppg_segment)
+    
+    # Create dummy RR labels to match the number of PPG segments
+    num_segments = len(ppg_segments)
+    dummy_rr_segments = np.zeros(num_segments)
+
+    return ppg_segments, dummy_rr_segments
+
 def plot_cwt_scalogram(ppg_segment, fs, fmin=0.1, fmax=0.6, num_scales=50):
     dt = 1.0 / fs
     fc = pywt.central_frequency('morl')
@@ -777,6 +869,68 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
     return processed_data
 
 
+# This is your new function, dedicated to processing data for SSL
+
+def process_ssl_data(cfg, raw_data):
+    processed_data = {}
+    # Assuming CapnoBase subjects are numbered differently, adjust loop as needed
+    for i in range(len(raw_data)): # Example loop, adjust to your data format
+        # For SSL, we only need the PPG signal
+        ppg = raw_data[f"{i:02}"][0] # Adjust key/index as needed
+        
+        # Determine sampling rate based on dataset
+        original_rate = 125
+        
+        # --- Denoising (PPG only) ---
+        if cfg.preprocessing.use_denoiser:
+            logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
+            _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=False)
+            if merged_segments:
+                ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
+                expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
+                ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
+            else:
+                logger.info(f"for this subject {i} there is no noise detected!")
+                expanded_removed_segments = []
+                ppg_denoised = ppg
+        else:
+            # This is the ablation path: the denoiser is skipped entirely.
+            logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
+            ppg_denoised = ppg
+            expanded_removed_segments = []
+        
+        # --- Standard PPG processing pipeline ---
+        ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
+        if np.any(np.isnan(ppg_filtered)):
+            logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
+        ppg_cliped, _, _ = remove_outliers(ppg_filtered)
+        ppg_normalized = normalize_signal(ppg_cliped)
+
+        subject_id = f"{i:02}" # Use a prefix to avoid ID collision
+        
+        # --- Use the new SSL segmentation function ---
+        ppg_segments, rr_segments = create_ssl_segments(
+            subject_id,
+            ppg_normalized,
+            original_len=len(ppg), # Use original length for gap handling
+            removed_segments=expanded_removed_segments,
+            ppg_fs=original_rate,
+            window_size_sec=32,
+            step_size_sec=2
+        )
+        
+        if not ppg_segments:
+            logger.warning(f"No valid PPG segments for subject {subject_id} after processing. Skipping.")
+            continue
+
+        # --- CWT Feature computation (remains the same) ---
+        n_jobs = max(1, cpu_count() - 6)
+        freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
+        
+        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments)
+        
+    return processed_data
+
 def create_balanced_folds(processed_data, n_splits=5):
 
 
@@ -940,7 +1094,79 @@ def setup_callbacks(cfg):
     )
     return [checkpoint_callback, early_stopping_callback, FirstBatchTimer()]
 
-def train(cfg, cv_splits, processed_data):
+
+def extract_all_segments(processed_data_dict):
+ 
+    # Initialize empty lists to store segments from all subjects
+    all_ppg = []
+    all_rr = []
+    all_freq = []
+
+    logger.info(f"Extracting segments from {len(processed_data_dict)} subjects...")
+
+    for subject_id, segments in processed_data_dict.items():
+        ppg_segments, rr_segments, freq_segments = segments
+        
+        # Important check: only add subjects that have valid segments
+        if len(ppg_segments) > 0:
+            all_ppg.append(ppg_segments)
+            all_rr.append(rr_segments)
+            all_freq.append(freq_segments)
+        else:
+            logger.warning(f"Subject {subject_id} has no valid segments, skipping.")
+    
+    # Check if any data was collected before trying to concatenate
+    if not all_ppg:
+        logger.error("No segments found in any subject. Returning empty arrays.")
+        return np.array([]), np.array([]), np.array([])
+
+    # Concatenate the lists of arrays into single, large NumPy arrays
+    # axis=0 stacks them along the first dimension (the "batch" dimension)
+    final_ppg = np.concatenate(all_ppg, axis=0)
+    final_rr = np.concatenate(all_rr, axis=0)
+    final_freq = np.concatenate(all_freq, axis=0)
+
+    logger.info(f"Total combined segments extracted: {len(final_ppg)}")
+
+    return final_ppg, final_rr, final_freq
+
+
+
+def setup_ssl_datamodule(cfg, fold_data, processed_capnobase_ssl, finetune_val_dataset):
+    """
+    Creates the data module for the SSL pre-training stage.
+    Conditionally adds CapnoBase data based on the config.
+    """
+    # Start with the BIDMC training data for the current fold
+    ssl_train_ppg = fold_data['train_ppg']
+    ssl_train_rr = fold_data['train_rr']
+    ssl_train_freq = fold_data['train_freq']
+
+    # Conditionally add CapnoBase data if the flag is set
+    if cfg.ssl.use_capnobase and processed_capnobase_ssl is not None:
+        logger.info("Adding CapnoBase data to the SSL training set.")
+        capnobase_ppg, capnobase_rr, capnobase_freq = extract_all_segments(processed_capnobase_ssl)
+        
+        # Combine with the BIDMC fold data
+        ssl_train_ppg = np.concatenate([ssl_train_ppg, capnobase_ppg], axis=0)
+        ssl_train_rr = np.concatenate([ssl_train_rr, capnobase_rr], axis=0)
+        ssl_train_freq = np.concatenate([ssl_train_freq, capnobase_freq], axis=0)
+    else:
+        logger.info("Using only BIDMC fold data for SSL training.")
+
+    # Create the final SSL DataModule
+    ssl_train_dataset = PPGRRDataset(ssl_train_ppg, ssl_train_rr, ssl_train_freq)
+    
+    # It's best practice to validate on the in-domain data (BIDMC validation set)
+    ssl_data_module = PPGRRDataModule(
+        ssl_train_dataset, finetune_val_dataset, None, # No test set needed for SSL
+        batch_size=cfg.training.batch_size, 
+        num_workers=cfg.training.num_workers
+    )
+    return ssl_data_module
+
+
+def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
     all_fold_results = []
     for cv_split in cv_splits:
@@ -1014,7 +1240,8 @@ def train(cfg, cv_splits, processed_data):
                     mode='min'
                 )
                 progress_bar = TQDMProgressBar(leave=True)
-
+                 # Create the specific datamodule for SSL
+                ssl_data_module = setup_ssl_datamodule(cfg, fold_data, processed_capnobase_ssl, val_dataset)
                 ssl_model = SSLPretrainModule(cfg)
                 ssl_trainer = pl.Trainer(
                     max_epochs=cfg.ssl.max_epochs,
@@ -1026,7 +1253,7 @@ def train(cfg, cv_splits, processed_data):
                     callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
                 )
                 # Start pre-training
-                ssl_trainer.fit(ssl_model, datamodule=data_module)
+                ssl_trainer.fit(ssl_model, datamodule=ssl_data_module)
                 best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
                 pretrained_path = f"fold_{fold_id}_encoder.pth"
                 torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
@@ -1113,10 +1340,19 @@ def main(cfg: DictConfig):
     logger.info(f"minimum number of segments across subjects: {min_len}")
     
 
+    processed_capnobase_ssl = None  # Initialize to None
+    if cfg.ssl.use_capnobase:
+        logger.info("Loading and processing CapnoBase dataset for SSL pre-training...")
+        capnobase_raw_data = read_capnobase_data("data/")
+        processed_capnobase_ssl = process_ssl_data(cfg, capnobase_raw_data)
+    else:
+        logger.info("Skipping CapnoBase dataset loading as per config.")
+
+
     cv_splits = create_balanced_folds(processed_data, n_splits=5)
     logger.info(f"Created folds: {cv_splits}")
 
-    all_fold_results = train(cfg, cv_splits, processed_data)
+    all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl)
 
     for fold_result in all_fold_results:
         logger.info(f"Fold {fold_result['fold_id']} test results: {fold_result['test_results']}")
