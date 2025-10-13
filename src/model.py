@@ -6,7 +6,8 @@ from pytorch_lightning import LightningDataModule
 from rwkv import RWKVRRModel
 from rwkv2 import RWKVTimeModel
 # from rwkv2_opt import RWKVTimeModelOPT
-from rwkv_opt import OptimizedRWKVRRModel
+# from rwkv_opt import OptimizedRWKVRRModel
+from rwkv_opt2 import OptimizedRWKVRRModel
 
 
 def ppg_augmentation(x, crop_ratio=0.8):
@@ -90,8 +91,12 @@ class RRLightningModule(pl.LightningModule):
             elif model_name == "RWKVTime":
                 model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
             elif model_name == "OptimizedRWKVRRModel":
-                model = OptimizedRWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
-                model.enable_optimizations()
+                model = OptimizedRWKVRRModel(input_size=1,
+                    hidden_size=cfg.training.time_model_output_dim,
+                    num_layers=cfg.training.time_model_num_layers,
+                    dropout=cfg.training.dropout,
+                    output_size=cfg.training.time_model_output_dim)
+                # model.enable_optimizations()
             # elif model_name == "RWKVTimeOPT":
             #     model = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
             else:
@@ -293,8 +298,12 @@ class SSLPretrainModule(pl.LightningModule):
         elif cfg.training.model_name == "RWKVTime":
             self.encoder = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
         elif cfg.training.model_name == "OptimizedRWKVRRModel":
-            self.encoder = OptimizedRWKVRRModel(input_size=1, hidden_size=64, num_layers=2, dropout=0.2)
-            self.encoder.enable_optimizations()
+            self.encoder = OptimizedRWKVRRModel(input_size=1,
+                    hidden_size=cfg.training.time_model_output_dim,
+                    num_layers=cfg.training.time_model_num_layers,
+                    dropout=cfg.training.dropout,
+                    output_size=cfg.training.time_model_output_dim)
+            # self.encoder.enable_optimizations()
         # elif cfg.training.model_name == "RWKVTimeOPT":
         #     self.encoder = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
 
