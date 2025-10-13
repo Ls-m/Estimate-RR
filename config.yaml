@@ -26,6 +26,8 @@ training:
   time_model_output_dim: 64
   freq_model_output_dim: 32
   use_ssl_pretraining: True  # Set to `true` to run SSL, `false` to train from scratch
+  time_model_num_layers: 2
+  dropout: 0.2
 
 
 logging:
