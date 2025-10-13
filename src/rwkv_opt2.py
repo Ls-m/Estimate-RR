@@ -757,17 +757,184 @@ def simple_gradient_check():
     return True
 
 
-if __name__ == "__main__":
-    # Test gradient flow
-    test_gradient_flow()
+
+
+class OptimizedRWKVRRModel(nn.Module):
+    """Optimized RWKV model for your regression task."""
     
-    # Run simple gradient check
-    simple_gradient_check()
+    def __init__(self, input_size=1, hidden_size=64, num_layers=2, dropout=0.2, output_size=64):
+        super().__init__()
+        
+        # Input projection
+        self.input_proj = nn.Linear(input_size, hidden_size)
+        
+        # RWKV layers using the mathematically correct WKV
+        self.rwkv_layers = nn.ModuleList()
+        for _ in range(num_layers):
+            self.rwkv_layers.append(OptimizedRWKVLayer(hidden_size, dropout))
+        
+        # Output layers
+        self.ln_out = nn.LayerNorm(hidden_size)
+        self.output_proj = nn.Linear(hidden_size, output_size)
+        
+        # Initialize parameters
+        self.apply(self._init_weights)
     
-    print("\n" + "="*60)
-    print("🎯 RWKV Implementation - FIXED GRADIENT FLOW")
-    print("✅ Removed .detach() anti-pattern")
-    print("✅ Fixed bb initialization consistency")
-    print("✅ Gradients flow correctly")
-    print("✅ Ready for training!")
-    print("="*60)
+    def _init_weights(self, module):
+        """Initialize weights properly."""
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.LayerNorm):
+            nn.init.zeros_(module.bias)
+            nn.init.ones_(module.weight)
+    
+    def forward(self, x):
+        """Forward pass through optimized RWKV.
+        
+        Args:
+            x: Input tensor of shape (batch_size, seq_len, input_size)
+            
+        Returns:
+            Output tensor of shape (batch_size, output_size)
+        """
+        # x: (B, T, input_size)
+        batch_size, seq_len, _ = x.shape
+        
+        # Project input to hidden size
+        x = self.input_proj(x)  # (B, T, hidden_size)
+        
+        # Process through RWKV layers
+        state = None
+        for layer in self.rwkv_layers:
+            x, state = layer(x, state)
+        
+        # Final processing
+        x = self.ln_out(x)
+        
+        # Take the last timestep output for regression
+        x = x[:, -1, :]  # (B, hidden_size)
+        
+        # Project to output size
+        output = self.output_proj(x)  # (B, output_size)
+        
+        return output
+
+
+class OptimizedRWKVLayer(nn.Module):
+    """Single RWKV layer using mathematically correct WKV."""
+    
+    def __init__(self, d_model: int, dropout: float = 0.1):
+        super().__init__()
+        self.d_model = d_model
+        
+        # Time mixing parameters
+        self.time_decay = nn.Parameter(torch.randn(d_model) * 0.01)
+        self.time_first = nn.Parameter(torch.randn(d_model) * 0.01)
+        
+        # Time mixing layers
+        self.time_mix_k = nn.Linear(d_model, d_model, bias=False)
+        self.time_mix_v = nn.Linear(d_model, d_model, bias=False)
+        self.time_mix_r = nn.Linear(d_model, d_model, bias=False)
+        
+        # Channel mixing layers
+        self.channel_mix_k = nn.Linear(d_model, d_model * 4, bias=False)
+        self.channel_mix_v = nn.Linear(d_model * 4, d_model, bias=False)
+        self.channel_mix_r = nn.Linear(d_model, d_model, bias=False)
+        
+        # Layer normalization
+        self.ln1 = nn.LayerNorm(d_model)
+        self.ln2 = nn.LayerNorm(d_model)
+        
+        # Dropout
+        self.dropout = nn.Dropout(dropout)
+        
+        # Time shift mixing ratios
+        self.time_mix_k_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        self.time_mix_v_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        self.time_mix_r_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        
+        self.channel_mix_k_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        self.channel_mix_r_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+    
+    def time_mixing(self, x, state=None):
+        """Time mixing using mathematically correct WKV."""
+        B, T, C = x.size()
+        
+        # Time shift
+        if state is not None and state.size(0) == B:
+            x_prev = torch.cat([state[:, :1, :], x[:, :-1, :]], dim=1)
+        else:
+            x_prev = torch.cat([torch.zeros_like(x[:, :1, :]), x[:, :-1, :]], dim=1)
+        
+        # Interpolate between current and previous
+        xk = x * self.time_mix_k_ratio + x_prev * (1 - self.time_mix_k_ratio)
+        xv = x * self.time_mix_v_ratio + x_prev * (1 - self.time_mix_v_ratio)
+        xr = x * self.time_mix_r_ratio + x_prev * (1 - self.time_mix_r_ratio)
+        
+        # Compute key, value, receptance
+        k = self.time_mix_k(xk)
+        v = self.time_mix_v(xv)
+        r = self.time_mix_r(xr)
+        
+        # Apply sigmoid to receptance
+        r = torch.sigmoid(r)
+        
+        # WKV operation using mathematically correct implementation
+        w = -torch.exp(self.time_decay)
+        u = self.time_first
+        
+        wkv_out, new_state = MathematicallyCorrectWKV.apply(w, u, k, v, state)
+        
+        return r * wkv_out, new_state
+    
+    def channel_mixing(self, x):
+        """Channel mixing operation."""
+        B, T, C = x.size()
+        
+        # Time shift for channel mixing
+        x_prev = torch.cat([torch.zeros_like(x[:, :1, :]), x[:, :-1, :]], dim=1)
+        
+        xk = x * self.channel_mix_k_ratio + x_prev * (1 - self.channel_mix_k_ratio)
+        xr = x * self.channel_mix_r_ratio + x_prev * (1 - self.channel_mix_r_ratio)
+        
+        k = self.channel_mix_k(xk)
+        r = self.channel_mix_r(xr)
+        
+        # Optimized activation
+        vv = self.channel_mix_v(torch.square(torch.relu(k)))
+        
+        return torch.sigmoid(r) * vv
+    
+    def forward(self, x, state=None):
+        """Forward pass through RWKV layer."""
+        # Time mixing with residual connection
+        residual = x
+        x_norm = self.ln1(x)
+        tm_out, new_state = self.time_mixing(x_norm, state)
+        x = residual + self.dropout(tm_out)
+        
+        # Channel mixing with residual connection
+        residual = x
+        x_norm = self.ln2(x)
+        cm_out = self.channel_mixing(x_norm)
+        x = residual + self.dropout(cm_out)
+        
+        return x, new_state
+
+
+# if __name__ == "__main__":
+#     # Test gradient flow
+#     test_gradient_flow()
+    
+#     # Run simple gradient check
+#     simple_gradient_check()
+    
+#     print("\n" + "="*60)
+#     print("🎯 RWKV Implementation - FIXED GRADIENT FLOW")
+#     print("✅ Removed .detach() anti-pattern")
+#     print("✅ Fixed bb initialization consistency")
+#     print("✅ Gradients flow correctly")
+#     print("✅ Ready for training!")
+#     print("="*60)
