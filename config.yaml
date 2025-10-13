@@ -42,4 +42,4 @@ mode:
 
 ssl:
   max_epochs: 1
-  use_capnobase: True
+  use_capnobase: False
