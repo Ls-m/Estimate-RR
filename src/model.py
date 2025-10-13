@@ -108,7 +108,7 @@ class RRLightningModule(pl.LightningModule):
             if pretrained_path:
                 print(f"Loading pretrained weights for time_model from: {pretrained_path}")
                 # Load the saved state dictionary of the encoder
-                pretrained_dict = torch.load(pretrained_path)
+                pretrained_dict = torch.load(pretrained_path,weights_only=False)
                 self.time_model.load_state_dict(pretrained_dict)
             else:
                 print("Training time_model from scratch.")
