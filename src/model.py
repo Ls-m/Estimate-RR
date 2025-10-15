@@ -3,13 +3,13 @@ import torch.nn as nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from pytorch_lightning import LightningDataModule
-from rwkv import RWKVRRModel
+# from rwkv import RWKVRRModel
 from rwkv2 import RWKVTimeModel
 # from rwkv2_opt import RWKVTimeModelOPT
 # from rwkv_opt import OptimizedRWKVRRModel
 # from rwkv_opt2 import OptimizedRWKVRRModel
 # from rwkv_opt3 import RWKVRRModel
-
+from rwkv_version2 import RWKVRRModel
 
 def ppg_augmentation(x, crop_ratio=0.8):
     """
