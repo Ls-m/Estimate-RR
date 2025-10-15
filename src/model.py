@@ -243,6 +243,11 @@ class RRLightningModule(pl.LightningModule):
         # Clear outputs
         self.test_step_outputs.clear()
 
+    def on_after_backward(self):
+        for name, param in self.named_parameters():
+            if param.grad is not None:
+                self.logger.experiment.add_histogram(f"{name}_grad", param.grad, self.global_step)
+
     def configure_optimizers(self):
         if self.cfg.optimizer == "adam":
             optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
