@@ -8,7 +8,7 @@ from rwkv2 import RWKVTimeModel
 # from rwkv2_opt import RWKVTimeModelOPT
 # from rwkv_opt import OptimizedRWKVRRModel
 # from rwkv_opt2 import OptimizedRWKVRRModel
-# from rwkv_opt3 import RWKVRRModel
+# from rwkv_opt3 import RWKVRRModel 
 from rwkv_version2 import RWKVRRModel
 
 def ppg_augmentation(x, crop_ratio=0.8):
@@ -276,7 +276,7 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "CosineAnnealingLR":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-6)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=70, eta_min=1e-5)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
