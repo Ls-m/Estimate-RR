@@ -4,6 +4,8 @@ preprocessing:
     high_freq: 0.6   # Higher frequency, well below Nyquist
     order: 4         # Lower order for better numerical stability
   use_denoiser: True  # Whether to apply denoising
+  use_edpa: True
+  use_wavelet_denoising: False
 
 
 
