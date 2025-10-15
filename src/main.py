@@ -851,7 +851,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             ppg_fs=original_rate,
             rr_fs=1,
             window_size_sec=32,
-            step_size_sec=2
+            step_size_sec=16
         )
         
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
