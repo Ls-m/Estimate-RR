@@ -793,6 +793,51 @@ def check_freq_features(freq_segments, rr_segments, subject_id):
     plt.ylabel("Normalized PSD")
     plt.show()
 
+# --- NEW WAVELET DENOISING FUNCTION ---
+def denoise_ppg_with_wavelet(ppg_signal, wavelet='sym8', level=5):
+    """
+    Denoises a PPG signal using the Wavelet Transform.
+
+    Args:
+        ppg_signal (np.array): The raw PPG signal.
+        wavelet (str): The type of mother wavelet to use (e.g., 'db4', 'sym8').
+                       'sym8' is often a good choice for PPG.
+        level (int): The number of decomposition levels.
+
+    Returns:
+        np.array: The denoised PPG signal, same length as the input.
+    """
+    # 1. Decompose the signal
+    coeffs = pywt.wavedec(ppg_signal, wavelet, level=level)
+
+    # 2. Calculate the threshold value
+    # Use the standard deviation of the finest detail coefficients as a noise estimate
+    sigma = np.median(np.abs(coeffs[-1])) / 0.6745
+    # Use the universal threshold
+    threshold = sigma * np.sqrt(2 * np.log(len(ppg_signal)))
+
+    # 3. Apply soft thresholding to the detail coefficients
+    # We don't threshold the approximation coefficients (coeffs[0])
+    thresholded_coeffs = [coeffs[0]]
+    for i in range(1, len(coeffs)):
+        thresholded_coeffs.append(pywt.threshold(coeffs[i], threshold, mode='soft'))
+
+    # 4. Reconstruct the signal from the thresholded coefficients
+    denoised_signal = pywt.waverec(thresholded_coeffs, wavelet)
+
+    # 5. Ensure the output signal has the same length as the input
+    # Reconstruction can sometimes result in a slightly different length
+    original_len = len(ppg_signal)
+    if len(denoised_signal) > original_len:
+        denoised_signal = denoised_signal[:original_len]
+    elif len(denoised_signal) < original_len:
+        # Pad with the last value if shorter
+        padding = original_len - len(denoised_signal)
+        denoised_signal = np.pad(denoised_signal, (0, padding), 'edge')
+
+    return denoised_signal
+
+
 def process_data(cfg, raw_data, dataset_name='bidmc'):
     # Code to process data goes here
     processed_data = {}
@@ -811,17 +856,24 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         
         if cfg.preprocessing.use_denoiser:
             logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
-            _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
-            if merged_segments:
-                ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
-                expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
-                ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
-                rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
-            else:
-                logger.info(f"for this subject {i} there is no noise detected!")
-                expanded_removed_segments = []
-                ppg_denoised = ppg
+            if cfg.preprocessing.use_edpa:
+                logger.info(f"Subject {i:02}: Running with EDPA denoising ENABLED.")
+                _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
+                if merged_segments:
+                    ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
+                    expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
+                    ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
+                    rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
+                else:
+                    logger.info(f"for this subject {i} there is no noise detected!")
+                    expanded_removed_segments = []
+                    ppg_denoised = ppg
+                    rr_labels_denoised = rr
+            elif cfg.preprocessing.use_wavelet_denoising:
+                logger.info(f"Subject {i:02}: Running with wavelet denoising ENABLED.")
+                ppg_denoised = denoise_ppg_with_wavelet(ppg)
                 rr_labels_denoised = rr
+                expanded_removed_segments = []
         else:
             # This is the ablation path: the denoiser is skipped entirely.
             logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
