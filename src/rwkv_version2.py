@@ -218,7 +218,7 @@ class RWKV(nn.Module):
 class RWKVRRModel(nn.Module):
     """RWKV model for respiratory rate estimation - SAME OUTPUT SHAPE AS ORIGINAL."""
     
-    def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=64, dropout=0.2):
+    def __init__(self, input_size=1, hidden_size=128, num_layers=2, output_size=64, dropout=0.2):
         super().__init__()
         self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout=dropout)
         self.fc = nn.Linear(hidden_size, output_size)
