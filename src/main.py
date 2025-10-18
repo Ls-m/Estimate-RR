@@ -26,6 +26,7 @@ import optuna
 from my_optuna import objective
 import json
 from pytorch_lightning.strategies import DDPStrategy
+from skimage.transform import resize
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -764,10 +765,47 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     return psd_band.astype(np.float32)
 
+def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, fmax=0.6, wavelet='morl'):
+    
+    # --- 1. Calculate CWT Coefficients ---
+    dt = 1.0 / fs
+    # Define the scales corresponding to the frequency range
+    # The number of scales will determine the initial height of the image
+    num_scales = image_size[0] 
+    fc = pywt.central_frequency(wavelet)
+    scale_min = fc / (fmax * dt)
+    scale_max = fc / (fmin * dt)
+    scales = np.linspace(scale_min, scale_max, num_scales)
+    
+    # Perform the Continuous Wavelet Transform
+    cwt_coeffs, freqs = pywt.cwt(ppg_segment, scales, wavelet, sampling_period=dt)
+    
+    # --- 2. Create the Image from Magnitude ---
+    # Take the absolute value to get the magnitude (energy)
+    scalogram = np.abs(cwt_coeffs)
+
+    # --- 3. Resize to Target Image Dimensions ---
+    # Use scikit-image for high-quality resizing
+    # anti_aliasing=True is recommended when downsampling
+    resized_scalogram = resize(scalogram, image_size, anti_aliasing=True)
+    
+    # --- 4. Normalize the Image to [0, 1] ---
+    # This is crucial for deep learning models
+    min_val = resized_scalogram.min()
+    max_val = resized_scalogram.max()
+    
+    if max_val - min_val > 1e-6: # Avoid division by zero
+        normalized_scalogram = (resized_scalogram - min_val) / (max_val - min_val)
+    else:
+        # Handle the case of a constant-value image
+        normalized_scalogram = np.zeros(image_size)
+        
+    return normalized_scalogram.astype(np.float32)
 
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     def process_single(segment):
-        return extract_cwt_features(segment, fs, num_scales=50)
+        return generate_cwt_scalogram(segment, fs)
+        # return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
         delayed(process_single)(segment) for segment in tqdm(ppg_segments)

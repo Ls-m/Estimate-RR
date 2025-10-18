@@ -63,7 +63,49 @@ class FreqEncoder(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class AdvancedScalogramEncoder(nn.Module):
+    """
+    A more robust CNN with Batch Normalization and Dropout for better training stability and regularization.
+    """
+    def __init__(self, in_channels=1, image_size=(64, 64), output_features=64, dropout_rate=0.3):
+        super().__init__()
+        self.conv_base = nn.Sequential(
+            # Block 1
+            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16), # Normalize activations
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            
+            # Block 2
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
 
+            # Block 3
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+        
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, in_channels, *image_size)
+            flattened_size = self.conv_base(dummy_input).flatten().shape[0]
+
+        self.mlp_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(flattened_size, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate), # Add dropout
+            nn.Linear(128, output_features)
+        )
+
+    def forward(self, x):
+        features_2d = self.conv_base(x)
+        feature_vector_1d = self.mlp_head(features_2d)
+        return feature_vector_1d
+    
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
@@ -114,7 +156,11 @@ class RRLightningModule(pl.LightningModule):
                 print("Training time_model from scratch.")
 
         if self.ablation_mode in ["fusion", "freq_only"]:
-            self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
+            # self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
+            self.freq_model = AdvancedScalogramEncoder(
+                image_size=(64, 64), # Make sure this matches your generated images
+                output_features=self.cfg.freq_model_output_dim # The output vector size
+            )
             fusion_dim += self.cfg.freq_model_output_dim
 
         
