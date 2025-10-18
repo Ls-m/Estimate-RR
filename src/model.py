@@ -102,6 +102,12 @@ class AdvancedScalogramEncoder(nn.Module):
         )
 
     def forward(self, x):
+        # --- FIX: Automatically add channel dimension if missing ---
+        # Conv2d expects a 4D tensor (B, C, H, W). If a 3D tensor (B, H, W) is passed,
+        # this adds the missing channel dimension.
+        if x.dim() == 3:
+            x = x.unsqueeze(1)
+            
         features_2d = self.conv_base(x)
         feature_vector_1d = self.mlp_head(features_2d)
         return feature_vector_1d
