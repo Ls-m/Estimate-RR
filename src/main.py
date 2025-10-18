@@ -1272,7 +1272,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
         fold_data = create_data_splits(cv_split, processed_data)
         train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
-        augment=True)
+        augment=False)
         val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
         augment=False)
         test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'],
