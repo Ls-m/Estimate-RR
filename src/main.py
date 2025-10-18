@@ -968,7 +968,7 @@ def process_ssl_data(cfg, raw_data):
             removed_segments=expanded_removed_segments,
             ppg_fs=original_rate,
             window_size_sec=32,
-            step_size_sec=2
+            step_size_sec=16
         )
         
         if not ppg_segments:
@@ -1271,9 +1271,12 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         logger.info(f"--- Starting Fold {fold_id} ---")
 
         fold_data = create_data_splits(cv_split, processed_data)
-        train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'])
-        val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'])
-        test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'])
+        train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
+        augment=True)
+        val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
+        augment=False)
+        test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'],
+        augment=False)
 
         batch_size = cfg.training.batch_size
         num_workers = cfg.training.num_workers
