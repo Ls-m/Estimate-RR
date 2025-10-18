@@ -767,7 +767,7 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     def process_single(segment):
-        return extract_cwt_features(segment, fs, num_scales=25)
+        return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
         delayed(process_single)(segment) for segment in tqdm(ppg_segments)
