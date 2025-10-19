@@ -10,6 +10,7 @@ from rwkv2 import RWKVTimeModel
 # from rwkv_opt2 import OptimizedRWKVRRModel
 # from rwkv_opt3 import RWKVRRModel 
 from rwkv_version2 import RWKVRRModel
+import torch.distributed as dist
 
 def ppg_augmentation(x, crop_ratio=0.8):
     """
@@ -154,10 +155,36 @@ class RRLightningModule(pl.LightningModule):
             fusion_dim += self.cfg.time_model_output_dim
             pretrained_path = cfg.training.get("pretrained_path")
             if pretrained_path:
+                # print(f"Loading pretrained weights for time_model from: {pretrained_path}")
+                # # Load the saved state dictionary of the encoder
+                # pretrained_dict = torch.load(pretrained_path,weights_only=False)
+                # self.time_model.load_state_dict(pretrained_dict)
+
                 print(f"Loading pretrained weights for time_model from: {pretrained_path}")
-                # Load the saved state dictionary of the encoder
-                pretrained_dict = torch.load(pretrained_path,weights_only=False)
-                self.time_model.load_state_dict(pretrained_dict)
+
+                # Determine the correct device for the current process
+                # In PyTorch Lightning, the rank is often stored in self.global_rank
+                # Or you can get it from the environment.
+                # For simplicity, we'll assume a GPU setup.
+                map_location = {'cuda:0': f'cuda:{dist.get_rank()}'} if torch.cuda.is_available() else 'cpu'
+
+                try:
+                    # Load the saved state dictionary of the encoder
+                    pretrained_dict = torch.load(
+                        pretrained_path,
+                        map_location=map_location,
+                        weights_only=True # Safer and recommended
+                    )
+                    self.time_model.load_state_dict(pretrained_dict)
+                    print(f"Rank {dist.get_rank()} successfully loaded weights.")
+
+                except FileNotFoundError:
+                    print(f"Error: Pretrained file not found at {pretrained_path}")
+                    # Handle error appropriately
+                except RuntimeError as e:
+                    print(f"Error loading file on Rank {dist.get_rank()}: {e}")
+                    # This will now only happen if the file is truly corrupt, not because of a race condition.
+                    raise e
             else:
                 print("Training time_model from scratch.")
 

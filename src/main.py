@@ -1397,7 +1397,15 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
                 pretrained_path = f"fold_{fold_id}_encoder.pth"
                 # Save only on rank 0 to avoid corruption in DDP
                 if not dist.is_initialized() or dist.get_rank() == 0:
+                    print(f"Rank {dist.get_rank()} is saving the model...")
                     torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+
+                # This barrier should be OUTSIDE the if statement.
+                # All processes must call it.
+                if dist.is_initialized():
+                    dist.barrier()
+
+                print(f"Rank {dist.get_rank()} has passed the barrier and will now proceed to loading.")
                 # torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
                 logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
                 # Set the path in the config for the fine-tuning stage
