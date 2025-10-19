@@ -27,6 +27,7 @@ from my_optuna import objective
 import json
 from pytorch_lightning.strategies import DDPStrategy
 from skimage.transform import resize
+import torch.distributed as dist
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -1394,7 +1395,10 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
                 ssl_trainer.fit(ssl_model, datamodule=ssl_data_module)
                 best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
                 pretrained_path = f"fold_{fold_id}_encoder.pth"
-                torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+                # Save only on rank 0 to avoid corruption in DDP
+                if not dist.is_initialized() or dist.get_rank() == 0:
+                    torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+                # torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
                 logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
                 # Set the path in the config for the fine-tuning stage
                 cfg.training.pretrained_path = pretrained_path
