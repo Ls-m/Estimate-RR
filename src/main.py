@@ -645,7 +645,8 @@ def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, origina
                     continue
                 # Check if len(rr_slice) > 0, corrected from len(rr_slice > 0)
                 if len(rr_slice) > 0:
-                    average_rr = np.mean(rr_slice)
+                    # average_rr = np.mean(rr_slice)
+                    average_rr = rr_slice
                     final_rr_labels.append(average_rr)
                     ppg_segments.append(ppg_segment)
 
@@ -1385,7 +1386,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
                     max_epochs=cfg.ssl.max_epochs,
                     accelerator="auto",
                     devices=cfg.hardware.devices,
-                    strategy='ddp_find_unused_parameters_true',
+                    # strategy='ddp_find_unused_parameters_true',
                     # detect_anomaly=True,
                     logger=ssl_logger,
                     log_every_n_steps=1,
@@ -1436,7 +1437,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy='ddp_find_unused_parameters_true',
+                            #  strategy='ddp_find_unused_parameters_true',
                             #  detect_anomaly=True,
                              callbacks=callbacks,
                              logger=tblogger,
