@@ -488,7 +488,7 @@ class RRLightningModule(pl.LightningModule):
             if model_name == "LSTMRR":
                 model = LSTMRRModel()
             elif model_name == "RWKV":
-                model = RWKVRRModel(input_size=1, hidden_size=128, num_layers=4, dropout=0.2)
+                model = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
             elif model_name == "RWKVTime":
                 model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
             # elif model_name == "OptimizedRWKVRRModel":
@@ -575,8 +575,9 @@ class RRLightningModule(pl.LightningModule):
 
         z = torch.cat(features, dim=1)  # (B, fusion_dim)
         
-        out = self.head(z).squeeze(-1)   # (B,)
-        return out
+        # out = self.head(z).squeeze(-1)   # (B,)
+        # return out
+        return z
  
     
     def training_step(self, batch, batch_idx):
@@ -730,7 +731,7 @@ class SSLPretrainModule(pl.LightningModule):
         if cfg.training.model_name == "LSTMRR":
             self.encoder = LSTMRRModel(output_size=64)
         elif cfg.training.model_name == "RWKV":
-            self.encoder = RWKVRRModel(input_size=1, hidden_size=128, num_layers=4, dropout=0.2)
+            self.encoder = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
         elif cfg.training.model_name == "RWKVTime":
             self.encoder = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
         # elif cfg.training.model_name == "OptimizedRWKVRRModel":
