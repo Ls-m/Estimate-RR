@@ -745,9 +745,9 @@ class SSLPretrainModule(pl.LightningModule):
         #     self.encoder = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
 
         self.projection_head = nn.Sequential(
-            nn.Linear(64, 128),
+            nn.Linear(32, 128),
             nn.ReLU(),
-            nn.Linear(128, 64)
+            nn.Linear(128, 32)
         )
 
     
