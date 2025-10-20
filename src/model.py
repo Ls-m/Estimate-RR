@@ -9,9 +9,10 @@ from rwkv2 import RWKVTimeModel
 # from rwkv_opt import OptimizedRWKVRRModel
 # from rwkv_opt2 import OptimizedRWKVRRModel
 # from rwkv_opt3 import RWKVRRModel 
-from rwkv_version2 import RWKVRRModel
+# from rwkv_version2 import RWKVRRModel
 import torch.distributed as dist
 from typing import Tuple, Optional
+from rwkv_version3 import RWKVRRModel
 
 def ppg_augmentation(x, crop_ratio=0.8):
     """
