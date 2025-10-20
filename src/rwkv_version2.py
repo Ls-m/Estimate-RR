@@ -212,28 +212,45 @@ class RWKV(nn.Module):
         x = self.ln_out(x)
         
         # Return final representation (last time step) - SAME AS YOUR ORIGINAL
-        return x[:, -1, :]  # (batch_size, hidden_size)
+        # return x[:, -1, :]  # (batch_size, hidden_size)
+        return x  # (batch_size, hidden_size)
+    
 
+
+# class RWKVRRModel(nn.Module):
+#     """RWKV model for respiratory rate estimation - SAME OUTPUT SHAPE AS ORIGINAL."""
+    
+#     def __init__(self, input_size=1, hidden_size=128, num_layers=2, output_size=64, dropout=0.2):
+#         super().__init__()
+#         self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout=dropout)
+#         self.fc = nn.Linear(hidden_size, output_size)
+
+#     def forward(self, x):
+#         """
+#         Forward pass - EXACTLY SAME AS YOUR ORIGINAL MODEL.
+        
+#         Args:
+#             x: Input PPG signal (B, T, 1)
+            
+#         Returns:
+#             Output tensor (B, output_size) - SAME SHAPE AS ORIGINAL
+#         """
+#         # x: (B, T, 1)
+#         rwkv_out = self.rwkv(x)        # returns (B, hidden_size)
+#         out = self.fc(rwkv_out)        # map to embedding dimension (B, output_size)
+#         return out
 
 class RWKVRRModel(nn.Module):
-    """RWKV model for respiratory rate estimation - SAME OUTPUT SHAPE AS ORIGINAL."""
-    
-    def __init__(self, input_size=1, hidden_size=128, num_layers=2, output_size=64, dropout=0.2):
+    def __init__(self, input_size=1, hidden_size=128, num_layers=2, dropout=0.2):
         super().__init__()
-        self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout=dropout)
-        self.fc = nn.Linear(hidden_size, output_size)
+        self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout)
+        self.temporal_pool = nn.AdaptiveAvgPool1d(32)
+        self.fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
-        """
-        Forward pass - EXACTLY SAME AS YOUR ORIGINAL MODEL.
-        
-        Args:
-            x: Input PPG signal (B, T, 1)
-            
-        Returns:
-            Output tensor (B, output_size) - SAME SHAPE AS ORIGINAL
-        """
-        # x: (B, T, 1)
-        rwkv_out = self.rwkv(x)        # returns (B, hidden_size)
-        out = self.fc(rwkv_out)        # map to embedding dimension (B, output_size)
-        return out
+        x = self.rwkv(x)                  # (B, 4000, hidden_size)
+        x = x.transpose(1, 2)             # (B, hidden_size, 4000)
+        x = self.temporal_pool(x)         # (B, hidden_size, 32)
+        x = x.transpose(1, 2)             # (B, 32, hidden_size)
+        out = self.fc(x)                  # (B, 32, 1)
+        return out.squeeze(-1)            # (B, 32)
