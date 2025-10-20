@@ -488,7 +488,7 @@ class RRLightningModule(pl.LightningModule):
             if model_name == "LSTMRR":
                 model = LSTMRRModel()
             elif model_name == "RWKV":
-                model = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
+                model = RWKVRRModel(input_size=1, hidden_size=128, num_layers=4, dropout=0.2)
             elif model_name == "RWKVTime":
                 model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
             # elif model_name == "OptimizedRWKVRRModel":
@@ -730,7 +730,7 @@ class SSLPretrainModule(pl.LightningModule):
         if cfg.training.model_name == "LSTMRR":
             self.encoder = LSTMRRModel(output_size=64)
         elif cfg.training.model_name == "RWKV":
-            self.encoder = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
+            self.encoder = RWKVRRModel(input_size=1, hidden_size=128, num_layers=4, dropout=0.2)
         elif cfg.training.model_name == "RWKVTime":
             self.encoder = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
         # elif cfg.training.model_name == "OptimizedRWKVRRModel":
