@@ -892,44 +892,49 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         if dataset_name == "bidmc":
             original_rate = 125
 
-        check_effect = False
+        # check_effect = False
         
-        if cfg.preprocessing.use_denoiser:
-            logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
-            if cfg.preprocessing.use_edpa:
-                logger.info(f"Subject {i:02}: Running with EDPA denoising ENABLED.")
-                _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
-                if merged_segments:
-                    ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
-                    expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
-                    ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
-                    rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
-                else:
-                    logger.info(f"for this subject {i} there is no noise detected!")
-                    expanded_removed_segments = []
-                    ppg_denoised = ppg
-                    rr_labels_denoised = rr
-            elif cfg.preprocessing.use_wavelet_denoising:
-                logger.info(f"Subject {i:02}: Running with wavelet denoising ENABLED.")
-                ppg_denoised = denoise_ppg_with_wavelet(ppg)
-                rr_labels_denoised = rr
-                expanded_removed_segments = []
-        else:
-            # This is the ablation path: the denoiser is skipped entirely.
-            logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
-            ppg_denoised = ppg
-            rr_labels_denoised = rr
-            expanded_removed_segments = []
+        # if cfg.preprocessing.use_denoiser:
+        #     logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
+        #     if cfg.preprocessing.use_edpa:
+        #         logger.info(f"Subject {i:02}: Running with EDPA denoising ENABLED.")
+        #         _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
+        #         if merged_segments:
+        #             ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
+        #             expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
+        #             ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
+        #             rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
+        #         else:
+        #             logger.info(f"for this subject {i} there is no noise detected!")
+        #             expanded_removed_segments = []
+        #             ppg_denoised = ppg
+        #             rr_labels_denoised = rr
+        #     elif cfg.preprocessing.use_wavelet_denoising:
+        #         logger.info(f"Subject {i:02}: Running with wavelet denoising ENABLED.")
+        #         ppg_denoised = denoise_ppg_with_wavelet(ppg)
+        #         rr_labels_denoised = rr
+        #         expanded_removed_segments = []
+        # else:
+        #     # This is the ablation path: the denoiser is skipped entirely.
+        #     logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
+        #     ppg_denoised = ppg
+        #     rr_labels_denoised = rr
+        #     expanded_removed_segments = []
         
-        ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
-        if np.any(np.isnan(ppg_filtered)):
-            logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
+        # ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
+        # if np.any(np.isnan(ppg_filtered)):
+        #     logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
 
-        # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
+        # # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
 
-        ppg_cliped,lower_band, higher_band = remove_outliers(ppg_filtered)
+        # ppg_cliped,lower_band, higher_band = remove_outliers(ppg_filtered)
         # check_outliers_removal_effect(ppg_filtered, ppg_cliped, original_rate, lower_band, higher_band)
 
+
+        ppg_cliped = ppg
+        rr_labels_denoised = rr
+        expanded_removed_segments = []
+        
         ppg_normalized = normalize_signal(ppg_cliped)
         # check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
 
