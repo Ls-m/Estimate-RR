@@ -29,7 +29,7 @@ class RWKVBlock(nn.Module):
         self.ln2 = nn.LayerNorm(d_model)
         
         # Dropout
-        self.dropout = nn.Dropout(dropout)
+        # self.dropout = nn.Dropout(dropout)
         
         # Time shift mixing ratios
         self.time_mix_k_ratio = nn.Parameter(torch.ones(1, 1, d_model))
@@ -143,11 +143,13 @@ class RWKVBlock(nn.Module):
         """Forward pass through RWKV block."""
         # Time mixing with residual connection
         tm_out, new_state = self.time_mixing(self.ln1(x), state)
-        x = x + self.dropout(tm_out)
+        # x = x + self.dropout(tm_out)
+        x = x + self.tm_out
         
         # Channel mixing with residual connection
         cm_out = self.channel_mixing(self.ln2(x))
-        x = x + self.dropout(cm_out)
+        # x = x + self.dropout(cm_out)
+        x = x + self.cm_out
         
         return x, new_state
 
