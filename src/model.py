@@ -133,336 +133,337 @@ class FreqEncoder(nn.Module):
 #         x = self.head(x)
 #         return x
 
-class ResidualBlock(nn.Module):
-    """Residual block for better gradient flow."""
-    def __init__(self, in_channels: int, out_channels: int, stride: int = 1, dropout_rate: float = 0.3):
-        super().__init__()
+# class ResidualBlock(nn.Module):
+#     """Residual block for better gradient flow."""
+#     def __init__(self, in_channels: int, out_channels: int, stride: int = 1, dropout_rate: float = 0.3):
+#         super().__init__()
         
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, 
-                              stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout2d(dropout_rate)
+#         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, 
+#                               stride=stride, padding=1, bias=False)
+#         self.bn1 = nn.BatchNorm2d(out_channels)
+#         self.relu = nn.ReLU(inplace=True)
+#         self.dropout = nn.Dropout2d(dropout_rate)
         
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, 
-                              stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
+#         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, 
+#                               stride=1, padding=1, bias=False)
+#         self.bn2 = nn.BatchNorm2d(out_channels)
         
-        # Shortcut connection
-        self.shortcut = nn.Sequential()
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, 
-                         stride=stride, bias=False),
-                nn.BatchNorm2d(out_channels)
-            )
+#         # Shortcut connection
+#         self.shortcut = nn.Sequential()
+#         if stride != 1 or in_channels != out_channels:
+#             self.shortcut = nn.Sequential(
+#                 nn.Conv2d(in_channels, out_channels, kernel_size=1, 
+#                          stride=stride, bias=False),
+#                 nn.BatchNorm2d(out_channels)
+#             )
     
-    def forward(self, x):
-        identity = self.shortcut(x)
+#     def forward(self, x):
+#         identity = self.shortcut(x)
         
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.dropout(out)
+#         out = self.conv1(x)
+#         out = self.bn1(out)
+#         out = self.relu(out)
+#         out = self.dropout(out)
         
-        out = self.conv2(out)
-        out = self.bn2(out)
+#         out = self.conv2(out)
+#         out = self.bn2(out)
         
-        out += identity  # Residual connection
-        out = self.relu(out)
+#         out += identity  # Residual connection
+#         out = self.relu(out)
         
-        return out
+#         return out
 
 
-class SEBlock(nn.Module):
-    """Squeeze-and-Excitation block for channel attention."""
-    def __init__(self, channels: int, reduction: int = 16):
-        super().__init__()
-        self.squeeze = nn.AdaptiveAvgPool2d(1)
-        self.excitation = nn.Sequential(
-            nn.Linear(channels, channels // reduction, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(channels // reduction, channels, bias=False),
-            nn.Sigmoid()
-        )
+# class SEBlock(nn.Module):
+#     """Squeeze-and-Excitation block for channel attention."""
+#     def __init__(self, channels: int, reduction: int = 16):
+#         super().__init__()
+#         self.squeeze = nn.AdaptiveAvgPool2d(1)
+#         self.excitation = nn.Sequential(
+#             nn.Linear(channels, channels // reduction, bias=False),
+#             nn.ReLU(inplace=True),
+#             nn.Linear(channels // reduction, channels, bias=False),
+#             nn.Sigmoid()
+#         )
     
-    def forward(self, x):
-        B, C, _, _ = x.size()
-        # Squeeze: global spatial information
-        y = self.squeeze(x).view(B, C)
-        # Excitation: channel-wise attention weights
-        y = self.excitation(y).view(B, C, 1, 1)
-        # Scale features by attention weights
-        return x * y.expand_as(x)
+#     def forward(self, x):
+#         B, C, _, _ = x.size()
+#         # Squeeze: global spatial information
+#         y = self.squeeze(x).view(B, C)
+#         # Excitation: channel-wise attention weights
+#         y = self.excitation(y).view(B, C, 1, 1)
+#         # Scale features by attention weights
+#         return x * y.expand_as(x)
 
 
-class SpatialAttention(nn.Module):
-    """Spatial attention mechanism."""
-    def __init__(self, kernel_size: int = 7):
-        super().__init__()
-        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, 
-                             padding=kernel_size//2, bias=False)
-        self.sigmoid = nn.Sigmoid()
+# class SpatialAttention(nn.Module):
+#     """Spatial attention mechanism."""
+#     def __init__(self, kernel_size: int = 7):
+#         super().__init__()
+#         self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, 
+#                              padding=kernel_size//2, bias=False)
+#         self.sigmoid = nn.Sigmoid()
     
-    def forward(self, x):
-        # Channel-wise statistics
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
+#     def forward(self, x):
+#         # Channel-wise statistics
+#         avg_out = torch.mean(x, dim=1, keepdim=True)
+#         max_out, _ = torch.max(x, dim=1, keepdim=True)
         
-        # Concatenate and compute spatial attention
-        attention = torch.cat([avg_out, max_out], dim=1)
-        attention = self.conv(attention)
-        attention = self.sigmoid(attention)
+#         # Concatenate and compute spatial attention
+#         attention = torch.cat([avg_out, max_out], dim=1)
+#         attention = self.conv(attention)
+#         attention = self.sigmoid(attention)
         
-        return x * attention
+#         return x * attention
 
 
-class RobustScalogramEncoder(nn.Module):
-    """
-    Highly robust scalogram encoder with multiple improvements:
-    - Residual connections for better gradient flow
-    - SE blocks for channel attention
-    - Spatial attention
-    - Layer normalization option
-    - Stochastic depth for regularization
-    - Progressive widening
-    """
-    def __init__(
-        self, 
-        in_channels: int = 1, 
-        image_size: Tuple[int, int] = (64, 64), 
-        output_features: int = 64,
-        dropout_rate: float = 0.3,
-        use_se: bool = True,
-        use_spatial_attention: bool = True,
-        stochastic_depth_rate: float = 0.1
-    ):
-        super().__init__()
+# class RobustScalogramEncoder(nn.Module):
+#     """
+#     Highly robust scalogram encoder with multiple improvements:
+#     - Residual connections for better gradient flow
+#     - SE blocks for channel attention
+#     - Spatial attention
+#     - Layer normalization option
+#     - Stochastic depth for regularization
+#     - Progressive widening
+#     """
+#     def __init__(
+#         self, 
+#         in_channels: int = 1, 
+#         image_size: Tuple[int, int] = (64, 64), 
+#         output_features: int = 64,
+#         dropout_rate: float = 0.3,
+#         use_se: bool = True,
+#         use_spatial_attention: bool = True,
+#         stochastic_depth_rate: float = 0.1
+#     ):
+#         super().__init__()
         
-        self.in_channels = in_channels
-        self.image_size = image_size
-        self.use_se = use_se
-        self.use_spatial_attention = use_spatial_attention
+#         self.in_channels = in_channels
+#         self.image_size = image_size
+#         self.use_se = use_se
+#         self.use_spatial_attention = use_spatial_attention
         
-        # Initial convolution
-        self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True)
-        )
+#         # Initial convolution
+#         self.stem = nn.Sequential(
+#             nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1, bias=False),
+#             nn.BatchNorm2d(32),
+#             nn.ReLU(inplace=True)
+#         )
         
-        # Residual blocks with progressive channel widening
-        self.layer1 = self._make_layer(32, 64, num_blocks=2, stride=2, dropout_rate=dropout_rate)
-        self.layer2 = self._make_layer(64, 128, num_blocks=2, stride=2, dropout_rate=dropout_rate)
-        self.layer3 = self._make_layer(128, 256, num_blocks=2, stride=2, dropout_rate=dropout_rate)
+#         # Residual blocks with progressive channel widening
+#         self.layer1 = self._make_layer(32, 64, num_blocks=2, stride=2, dropout_rate=dropout_rate)
+#         self.layer2 = self._make_layer(64, 128, num_blocks=2, stride=2, dropout_rate=dropout_rate)
+#         self.layer3 = self._make_layer(128, 256, num_blocks=2, stride=2, dropout_rate=dropout_rate)
         
-        # Attention modules
-        if use_se:
-            self.se1 = SEBlock(64)
-            self.se2 = SEBlock(128)
-            self.se3 = SEBlock(256)
+#         # Attention modules
+#         if use_se:
+#             self.se1 = SEBlock(64)
+#             self.se2 = SEBlock(128)
+#             self.se3 = SEBlock(256)
         
-        if use_spatial_attention:
-            self.spatial_attn = SpatialAttention()
+#         if use_spatial_attention:
+#             self.spatial_attn = SpatialAttention()
         
-        # Global pooling
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
+#         # Global pooling
+#         self.global_pool = nn.AdaptiveAvgPool2d(1)
         
-        # Calculate flattened size
-        with torch.no_grad():
-            dummy_input = torch.zeros(1, in_channels, *image_size)
-            features = self._forward_features(dummy_input)
-            flattened_size = features.shape[1]
+#         # Calculate flattened size
+#         with torch.no_grad():
+#             dummy_input = torch.zeros(1, in_channels, *image_size)
+#             features = self._forward_features(dummy_input)
+#             flattened_size = features.shape[1]
         
-        # Enhanced MLP head with skip connection
-        self.mlp_head = nn.Sequential(
-            nn.Linear(flattened_size, 512),
-            nn.LayerNorm(512),  # Layer norm instead of batch norm for stability
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_rate),
+#         # Enhanced MLP head with skip connection
+#         self.mlp_head = nn.Sequential(
+#             nn.Linear(flattened_size, 512),
+#             nn.LayerNorm(512),  # Layer norm instead of batch norm for stability
+#             nn.ReLU(inplace=True),
+#             nn.Dropout(dropout_rate),
             
-            nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_rate * 0.5),  # Less dropout in deeper layers
+#             nn.Linear(512, 256),
+#             nn.LayerNorm(256),
+#             nn.ReLU(inplace=True),
+#             nn.Dropout(dropout_rate * 0.5),  # Less dropout in deeper layers
             
-            nn.Linear(256, output_features)
-        )
+#             nn.Linear(256, output_features)
+#         )
         
-        # Initialize weights
-        self.apply(self._init_weights)
+#         # Initialize weights
+#         self.apply(self._init_weights)
     
-    def _make_layer(self, in_channels: int, out_channels: int, 
-                   num_blocks: int, stride: int, dropout_rate: float):
-        """Create a layer of residual blocks."""
-        layers = []
+#     def _make_layer(self, in_channels: int, out_channels: int, 
+#                    num_blocks: int, stride: int, dropout_rate: float):
+#         """Create a layer of residual blocks."""
+#         layers = []
         
-        # First block with stride for downsampling
-        layers.append(ResidualBlock(in_channels, out_channels, stride, dropout_rate))
+#         # First block with stride for downsampling
+#         layers.append(ResidualBlock(in_channels, out_channels, stride, dropout_rate))
         
-        # Remaining blocks
-        for _ in range(1, num_blocks):
-            layers.append(ResidualBlock(out_channels, out_channels, 1, dropout_rate))
+#         # Remaining blocks
+#         for _ in range(1, num_blocks):
+#             layers.append(ResidualBlock(out_channels, out_channels, 1, dropout_rate))
         
-        return nn.Sequential(*layers)
+#         return nn.Sequential(*layers)
     
-    def _init_weights(self, m):
-        """Initialize weights with proper scaling."""
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.BatchNorm2d):
-            nn.init.constant_(m.weight, 1)
-            nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.Linear):
-            nn.init.normal_(m.weight, 0, 0.01)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
+#     def _init_weights(self, m):
+#         """Initialize weights with proper scaling."""
+#         if isinstance(m, nn.Conv2d):
+#             nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
+#         elif isinstance(m, nn.BatchNorm2d):
+#             nn.init.constant_(m.weight, 1)
+#             nn.init.constant_(m.bias, 0)
+#         elif isinstance(m, nn.Linear):
+#             nn.init.normal_(m.weight, 0, 0.01)
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)
     
-    def _forward_features(self, x):
-        """Forward through feature extraction layers."""
-        # Add channel dimension if needed
-        if x.dim() == 3:
-            x = x.unsqueeze(1)
+#     def _forward_features(self, x):
+#         """Forward through feature extraction layers."""
+#         # Add channel dimension if needed
+#         if x.dim() == 3:
+#             x = x.unsqueeze(1)
         
-        # Stem
-        x = self.stem(x)
+#         # Stem
+#         x = self.stem(x)
         
-        # Layer 1
-        x = self.layer1(x)
-        if self.use_se:
-            x = self.se1(x)
+#         # Layer 1
+#         x = self.layer1(x)
+#         if self.use_se:
+#             x = self.se1(x)
         
-        # Layer 2
-        x = self.layer2(x)
-        if self.use_se:
-            x = self.se2(x)
+#         # Layer 2
+#         x = self.layer2(x)
+#         if self.use_se:
+#             x = self.se2(x)
         
-        # Layer 3
-        x = self.layer3(x)
-        if self.use_se:
-            x = self.se3(x)
+#         # Layer 3
+#         x = self.layer3(x)
+#         if self.use_se:
+#             x = self.se3(x)
         
-        # Spatial attention
-        if self.use_spatial_attention:
-            x = self.spatial_attn(x)
+#         # Spatial attention
+#         if self.use_spatial_attention:
+#             x = self.spatial_attn(x)
         
-        # Global pooling
-        x = self.global_pool(x)
-        x = x.view(x.size(0), -1)
+#         # Global pooling
+#         x = self.global_pool(x)
+#         x = x.view(x.size(0), -1)
         
-        return x
+#         return x
     
-    def forward(self, x):
-        """Forward pass."""
-        features = self._forward_features(x)
-        output = self.mlp_head(features)
-        return output
+#     def forward(self, x):
+#         """Forward pass."""
+#         features = self._forward_features(x)
+#         output = self.mlp_head(features)
+#         return output
+
+# class AdvancedScalogramEncoder(nn.Module):
+#     """
+#     Ultimate robustness with all bells and whistles.
+#     """
+#     def __init__(
+#         self,
+#         in_channels: int = 1,
+#         image_size: Tuple[int, int] = (64, 64),
+#         output_features: int = 64,
+#         dropout_rate: float = 0.3,
+#     ):
+#         super().__init__()
+        
+#         self.encoder = RobustScalogramEncoder(
+#             in_channels=in_channels,
+#             image_size=image_size,
+#             output_features=output_features,
+#             dropout_rate=dropout_rate,
+#             use_se=True,
+#             use_spatial_attention=True
+#         )
+        
+#         # Add auxiliary classifier for regularization during training
+#         with torch.no_grad():
+#             dummy = torch.zeros(1, in_channels, *image_size)
+#             feat_size = self.encoder._forward_features(dummy).shape[1]
+        
+#         self.aux_classifier = nn.Sequential(
+#             nn.Linear(feat_size, output_features)
+#         )
+        
+#         self.training_with_aux = False
+    
+#     def forward(self, x, return_aux=False):
+#         """
+#         Forward pass with optional auxiliary output.
+        
+#         Args:
+#             x: Input tensor
+#             return_aux: If True, return both main and auxiliary outputs
+#         """
+#         if x.dim() == 3:
+#             x = x.unsqueeze(1)
+        
+#         # Get features
+#         features = self.encoder._forward_features(x)
+        
+#         # Main output
+#         main_output = self.encoder.mlp_head(features)
+        
+#         if return_aux and self.training:
+#             aux_output = self.aux_classifier(features)
+#             return main_output, aux_output
+        
+#         return main_output
 
 class AdvancedScalogramEncoder(nn.Module):
     """
-    Ultimate robustness with all bells and whistles.
+    A more robust CNN with Batch Normalization and Dropout for better training stability and regularization.
     """
-    def __init__(
-        self,
-        in_channels: int = 1,
-        image_size: Tuple[int, int] = (64, 64),
-        output_features: int = 64,
-        dropout_rate: float = 0.3,
-    ):
+    def __init__(self, in_channels=1, image_size=(64, 64), output_features=64, dropout_rate=0.3):
         super().__init__()
-        
-        self.encoder = RobustScalogramEncoder(
-            in_channels=in_channels,
-            image_size=image_size,
-            output_features=output_features,
-            dropout_rate=dropout_rate,
-            use_se=True,
-            use_spatial_attention=True
+        self.conv_base = nn.Sequential(
+            # Block 1
+            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16), # Normalize activations
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            
+            # Block 2
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+
+            # Block 3
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
         )
         
-        # Add auxiliary classifier for regularization during training
         with torch.no_grad():
-            dummy = torch.zeros(1, in_channels, *image_size)
-            feat_size = self.encoder._forward_features(dummy).shape[1]
-        
-        self.aux_classifier = nn.Sequential(
-            nn.Linear(feat_size, output_features)
+            dummy_input = torch.zeros(1, in_channels, *image_size)
+            flattened_size = self.conv_base(dummy_input).flatten().shape[0]
+
+        self.mlp_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(flattened_size, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate), # Add dropout
+            nn.Linear(128, output_features)
         )
-        
-        self.training_with_aux = False
-    
-    def forward(self, x, return_aux=False):
-        """
-        Forward pass with optional auxiliary output.
-        
-        Args:
-            x: Input tensor
-            return_aux: If True, return both main and auxiliary outputs
-        """
+
+    def forward(self, x):
+        # --- FIX: Automatically add channel dimension if missing ---
+        # Conv2d expects a 4D tensor (B, C, H, W). If a 3D tensor (B, H, W) is passed,
+        # this adds the missing channel dimension.
         if x.dim() == 3:
             x = x.unsqueeze(1)
-        
-        # Get features
-        features = self.encoder._forward_features(x)
-        
-        # Main output
-        main_output = self.encoder.mlp_head(features)
-        
-        if return_aux and self.training:
-            aux_output = self.aux_classifier(features)
-            return main_output, aux_output
-        
-        return main_output
-# class AdvancedScalogramEncoder(nn.Module):
-#     """
-#     A more robust CNN with Batch Normalization and Dropout for better training stability and regularization.
-#     """
-#     def __init__(self, in_channels=1, image_size=(64, 64), output_features=64, dropout_rate=0.3):
-#         super().__init__()
-#         self.conv_base = nn.Sequential(
-#             # Block 1
-#             nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(16), # Normalize activations
-#             nn.ReLU(),
-#             nn.MaxPool2d(2, 2),
             
-#             # Block 2
-#             nn.Conv2d(16, 32, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(32),
-#             nn.ReLU(),
-#             nn.MaxPool2d(2, 2),
-
-#             # Block 3
-#             nn.Conv2d(32, 64, kernel_size=3, padding=1),
-#             nn.BatchNorm2d(64),
-#             nn.ReLU(),
-#             nn.MaxPool2d(2, 2)
-#         )
-        
-#         with torch.no_grad():
-#             dummy_input = torch.zeros(1, in_channels, *image_size)
-#             flattened_size = self.conv_base(dummy_input).flatten().shape[0]
-
-#         self.mlp_head = nn.Sequential(
-#             nn.Flatten(),
-#             nn.Linear(flattened_size, 128),
-#             nn.ReLU(),
-#             nn.Dropout(dropout_rate), # Add dropout
-#             nn.Linear(128, output_features)
-#         )
-
-#     def forward(self, x):
-#         # --- FIX: Automatically add channel dimension if missing ---
-#         # Conv2d expects a 4D tensor (B, C, H, W). If a 3D tensor (B, H, W) is passed,
-#         # this adds the missing channel dimension.
-#         if x.dim() == 3:
-#             x = x.unsqueeze(1)
-            
-#         features_2d = self.conv_base(x)
-#         feature_vector_1d = self.mlp_head(features_2d)
-#         return feature_vector_1d
+        features_2d = self.conv_base(x)
+        feature_vector_1d = self.mlp_head(features_2d)
+        return feature_vector_1d
     
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):

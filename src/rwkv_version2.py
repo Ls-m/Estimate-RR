@@ -243,11 +243,27 @@ class RWKV(nn.Module):
 class RWKVRRModel(nn.Module):
     def __init__(self, input_size=1, hidden_size=128, num_layers=2, dropout=0.2):
         super().__init__()
-        self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout)
+        self.input_convs = nn.ModuleList([
+            nn.Conv1d(1, hidden_size // 4, kernel_size=k, padding=k // 2)
+            for k in [3, 7, 15, 31]
+        ])
+        self.conv_bn = nn.BatchNorm1d(hidden_size)  # normalize concatenated conv features
+        self.conv_act = nn.ReLU()
+        self.rwkv = RWKV(hidden_size, hidden_size, num_layers, dropout=dropout)
         self.temporal_pool = nn.AdaptiveAvgPool1d(32)
         self.fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
+        x = x.transpose(1, 2)  # (B, 1, 4000) for Conv1d
+
+        # Apply multi-scale convolutions
+        conv_outs = [conv(x) for conv in self.input_convs]   # list of (B, hidden_size//4, 4000)
+        x = torch.cat(conv_outs, dim=1)                      # (B, hidden_size, 4000)
+        x = self.conv_bn(x)
+        x = self.conv_act(x)
+
+        # Prepare for RWKV input
+        x = x.transpose(1, 2)  # (B, 4000, hidden_size)
         x = self.rwkv(x)                  # (B, 4000, hidden_size)
         x = x.transpose(1, 2)             # (B, hidden_size, 4000)
         x = self.temporal_pool(x)         # (B, hidden_size, 32)
