@@ -38,8 +38,8 @@ class PPGRRDataset(Dataset):
             if torch.rand(1) < 0.5:
                 scale_factor = torch.FloatTensor(1).uniform_(0.8, 1.2)
                 ppg_segment = ppg_segment * scale_factor
-
-        ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32).unsqueeze(-1)
+        
+        ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32)
         rr_tensor = torch.tensor(rr, dtype=torch.float32)
         freq_tensor = torch.tensor(freq, dtype=torch.float32)
         return ppg_tensor, rr_tensor, freq_tensor
