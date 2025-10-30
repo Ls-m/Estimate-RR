@@ -12,6 +12,7 @@ from rwkv2 import RWKVTimeModel
 from rwkv_version2 import RWKVRRModel
 import torch.distributed as dist
 from typing import Tuple, Optional
+import torchmetrics
 
 def ppg_augmentation(x, crop_ratio=0.8):
     """
@@ -42,15 +43,29 @@ def ppg_augmentation(x, crop_ratio=0.8):
 
 
 class LSTMRRModel(nn.Module):
-    def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=64, dropout=0.2):
+    def __init__(self, input_size=1, hidden_size=128, num_layers=4, output_size=32, dropout=0.2):
         super(LSTMRRModel, self).__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
 
     def forward(self, x):
         lstm_out, _ = self.lstm(x)
+        
         out = self.fc(lstm_out[:, -1, :])
         return out
+    
+class LinearModel(nn.Module):
+    def __init__(self, input_size=60*125, hidden_size=2048, output_size=512, dropout=0):
+        super(LinearModel, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, output_size)
+        )
+
+    def forward(self, x):
+        return self.model(x)
     
 class FreqEncoder(nn.Module):
     def __init__(self, n_bins, hidden=32):
@@ -468,6 +483,13 @@ class AdvancedScalogramEncoder(nn.Module):
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
+        # self.test_mae_metric = torchmetrics.MeanAbsoluteError().to(self.device)
+        metrics = {
+            "MAE": torchmetrics.MeanAbsoluteError(),
+            "MSE": torchmetrics.MeanSquaredError()
+        }
+        self.test_metrics = torchmetrics.MetricCollection(metrics, prefix="test/")
+
         self.cfg = cfg.training
         self.learning_rate = cfg.training.learning_rate
         self.weight_decay = cfg.training.weight_decay
@@ -486,12 +508,14 @@ class RRLightningModule(pl.LightningModule):
 
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
-            if model_name == "LSTMRR":
-                model = LSTMRRModel()
+            if model_name == "Linear":
+                model = LinearModel(input_size=cfg.training.window_size*125, hidden_size=2048, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+            elif model_name == "LSTMRR":
+                model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
-                model = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
+                model = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=cfg.training.dropout)
             elif model_name == "RWKVTime":
-                model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
+                model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=cfg.training.dropout)
             # elif model_name == "OptimizedRWKVRRModel":
             #     model = OptimizedRWKVRRModel(input_size=1,
             #         hidden_size=cfg.training.time_model_output_dim,
@@ -550,10 +574,10 @@ class RRLightningModule(pl.LightningModule):
 
         
         self.head = nn.Sequential(
-            nn.Linear(fusion_dim, 64),
+            nn.Linear(fusion_dim, 128),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, 32)
+            nn.Dropout(cfg.training.dropout),
+            nn.Linear(128, 60)
         )
 
         if cfg.training.criterion == "MSELoss":
@@ -576,19 +600,24 @@ class RRLightningModule(pl.LightningModule):
 
         z = torch.cat(features, dim=1)  # (B, fusion_dim)
         
-        # out = self.head(z).squeeze(-1)   # (B,)
-        # return out
-        return z
+        out = self.head(z)  # (B,)
+        return out
+        # return z
  
     
     def training_step(self, batch, batch_idx):
         ppg, rr, freq = batch
+        bs = ppg.shape[0]
+        # if len(ppg.shape) > 2:
+        #     ppg = ppg.squeeze()
+        # else:
+        #     print("this is ppg shape: ", ppg.shape)
         rr_pred = self.forward(ppg, freq)
-        rr_pred = rr_pred.squeeze(-1)
+        # rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
         current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
         self.log("lr", current_lr, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
 
         # Store outputs for epoch-end calculations
         self.training_step_outputs.append({
@@ -608,7 +637,7 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.training_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('train_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+        # self.log('train_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
         self.log('train_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
@@ -616,10 +645,11 @@ class RRLightningModule(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         ppg, rr, freq = batch
+        bs = ppg.shape[0]
         rr_pred = self.forward(ppg, freq)
-        rr_pred = rr_pred.squeeze(-1)
+        # rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
-        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
 
         # Store outputs for epoch-end calculations
         self.validation_step_outputs.append({
@@ -638,7 +668,7 @@ class RRLightningModule(pl.LightningModule):
         targets = torch.cat([x['target'] for x in self.validation_step_outputs], dim=0)
         mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('val_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+        # self.log('val_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
         self.log('val_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
         # Clear outputs
@@ -647,12 +677,16 @@ class RRLightningModule(pl.LightningModule):
     
     def test_step(self, batch, batch_idx):
         ppg, rr, freq = batch
+        bs = ppg.shape[0]
         rr_pred = self.forward(ppg, freq)
-        rr_pred = rr_pred.squeeze(-1)
+        # rr_pred = rr_pred.squeeze(-1)
         loss = self.criterion(rr_pred, rr)
-        self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        # Store outputs for epoch-end calculations
+        self.log('test_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
+        metrics = self.test_metrics(rr_pred, rr)
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
+        # self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        # # Store outputs for epoch-end calculations
         self.test_step_outputs.append({
             'test_loss': loss.detach().cpu(),
             'pred': rr_pred.detach().cpu(),
@@ -667,13 +701,19 @@ class RRLightningModule(pl.LightningModule):
         avg_loss = torch.stack([x['test_loss'] for x in self.test_step_outputs]).mean()
         preds = torch.cat([x['pred'] for x in self.test_step_outputs], dim=0)
         targets = torch.cat([x['target'] for x in self.test_step_outputs], dim=0)
-        mae = torch.mean(torch.abs(preds - targets))
+        print(f"preds are: {preds}")
+        print(f"targets are: {targets}")
+        # mae = torch.mean(torch.abs(preds - targets))
 
-        self.log('test_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
-        self.log('test_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
+        # self.log('test_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+        # self.log('test_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
-        # Clear outputs
-        self.test_step_outputs.clear()
+        # # Clear outputs
+        # self.test_step_outputs.clear()
+
+        # mae = self.test_mae_metric.compute()
+        # self.log('test_mae', mae, sync_dist=True)
+        # self.test_mae_metric.reset()
 
     # def on_after_backward(self):
     #     for name, param in self.named_parameters():
@@ -685,6 +725,7 @@ class RRLightningModule(pl.LightningModule):
             optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
         elif self.cfg.optimizer == "adamw":
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+            # optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate)
         elif self.cfg.optimizer == "sgd":
             optimizer = torch.optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=self.weight_decay)
         else:
@@ -708,7 +749,7 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "CosineAnnealingLR":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=40, eta_min=1e-6)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=2000, eta_min=1e-7)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
