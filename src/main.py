@@ -585,90 +585,90 @@ def reconstruct_noise(raw_ppg, all_noisy_segments, fs):
 
 
 
-# def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, original_len, removed_segments, ppg_fs,
-#                                       rr_fs, window_size_sec, step_size_sec):
-#     if subject_id == '45':
-#         print("subject id with no segments")
-#         print(len(ppg_signal))
-#     ppg_segments = []
-#     final_rr_labels = []
+def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, original_len, removed_segments, ppg_fs,
+                                      rr_fs, window_size_sec, step_size_sec):
+    if subject_id == '45':
+        print("subject id with no segments")
+        print(len(ppg_signal))
+    ppg_segments = []
+    final_rr_labels = []
 
-#     window_samples = window_size_sec * ppg_fs
-#     step_samples = step_size_sec * ppg_fs
-#     fs_ratio = ppg_fs / rr_fs
+    window_samples = window_size_sec * ppg_fs
+    step_samples = step_size_sec * ppg_fs
+    fs_ratio = ppg_fs / rr_fs
 
-#     # --- Find Continuous Blocks (Bug Fixed) ---
-#     # BUG FIX: Initialize with the full signal range to start the process.
-#     continuous_blocks = [(0, original_len)]
-#     if removed_segments:
+    # --- Find Continuous Blocks (Bug Fixed) ---
+    # BUG FIX: Initialize with the full signal range to start the process.
+    continuous_blocks = [(0, original_len)]
+    if removed_segments:
         
-#         for rem_start, rem_end in removed_segments:
-#             new_blocks = []
-#             for block_start, block_end in continuous_blocks:
-#                 # If the removed segment is outside this block, keep the block
-#                 if rem_end <= block_start or rem_start >= block_end:
-#                     new_blocks.append((block_start, block_end))
-#                     continue
-#                 # If there's a valid portion before the removed segment
-#                 if rem_start > block_start:
-#                     new_blocks.append((block_start, rem_start))
-#                 # If there's a valid portion after the removed segment
-#                 if rem_end < block_end:
-#                     new_blocks.append((rem_end, block_end))
-#             continuous_blocks = new_blocks
+        for rem_start, rem_end in removed_segments:
+            new_blocks = []
+            for block_start, block_end in continuous_blocks:
+                # If the removed segment is outside this block, keep the block
+                if rem_end <= block_start or rem_start >= block_end:
+                    new_blocks.append((block_start, block_end))
+                    continue
+                # If there's a valid portion before the removed segment
+                if rem_start > block_start:
+                    new_blocks.append((block_start, rem_start))
+                # If there's a valid portion after the removed segment
+                if rem_end < block_end:
+                    new_blocks.append((rem_end, block_end))
+            continuous_blocks = new_blocks
 
-#     # --- Create Index Mappings (Calculated Once) ---
-#     # Create mapping for PPG signal indices
-#     keep_mask_ppg = np.ones(original_len, dtype=bool)
-#     for start, end in removed_segments:
-#         keep_mask_ppg[start:end] = False
-#     clean_indices_map_ppg = np.cumsum(keep_mask_ppg) - 1
+    # --- Create Index Mappings (Calculated Once) ---
+    # Create mapping for PPG signal indices
+    keep_mask_ppg = np.ones(original_len, dtype=bool)
+    for start, end in removed_segments:
+        keep_mask_ppg[start:end] = False
+    clean_indices_map_ppg = np.cumsum(keep_mask_ppg) - 1
 
-#     # OPTIMIZATION: This block is now calculated only once for efficiency.
-#     # Create mapping for RR label indices
-#     rr_original_len = int(np.ceil(original_len / fs_ratio))
-#     keep_mask_rr = np.ones(rr_original_len, dtype=bool)
-#     for rs, re in removed_segments:
-#         start_rr = int(np.floor(rs / fs_ratio))
-#         end_rr = int(np.ceil(re / fs_ratio))
-#         if start_rr < end_rr: # Ensure valid slice
-#              keep_mask_rr[start_rr:end_rr] = False
-#     clean_rr_map = np.cumsum(keep_mask_rr) - 1
+    # OPTIMIZATION: This block is now calculated only once for efficiency.
+    # Create mapping for RR label indices
+    rr_original_len = int(np.ceil(original_len / fs_ratio))
+    keep_mask_rr = np.ones(rr_original_len, dtype=bool)
+    for rs, re in removed_segments:
+        start_rr = int(np.floor(rs / fs_ratio))
+        end_rr = int(np.ceil(re / fs_ratio))
+        if start_rr < end_rr: # Ensure valid slice
+             keep_mask_rr[start_rr:end_rr] = False
+    clean_rr_map = np.cumsum(keep_mask_rr) - 1
 
-#     # --- Main Segmentation Loop ---
-#     for block_start, block_end in continuous_blocks:
-#         for current_pos in range(block_start, block_end - window_samples + 1, step_samples):
-#             seg_start_orig = current_pos
-#             seg_end_orig = current_pos + window_samples
+    # --- Main Segmentation Loop ---
+    for block_start, block_end in continuous_blocks:
+        for current_pos in range(block_start, block_end - window_samples + 1, step_samples):
+            seg_start_orig = current_pos
+            seg_end_orig = current_pos + window_samples
 
-#             # Map PPG indices and get segment
-#             seg_start_clean = clean_indices_map_ppg[seg_start_orig]
-#             # The length of the segment is fixed, so we just add window_samples
-#             seg_end_clean = seg_start_clean + window_samples
-#             ppg_segment = ppg_signal[seg_start_clean:seg_end_clean]
+            # Map PPG indices and get segment
+            seg_start_clean = clean_indices_map_ppg[seg_start_orig]
+            # The length of the segment is fixed, so we just add window_samples
+            seg_end_clean = seg_start_clean + window_samples
+            ppg_segment = ppg_signal[seg_start_clean:seg_end_clean]
 
-#             # Map RR indices and get average label
-#             rr_start_idx_orig = int(np.floor(seg_start_orig / fs_ratio))
-#             rr_end_idx_orig = int(np.floor((seg_end_orig - 1) / fs_ratio))
+            # Map RR indices and get average label
+            rr_start_idx_orig = int(np.floor(seg_start_orig / fs_ratio))
+            rr_end_idx_orig = int(np.floor((seg_end_orig - 1) / fs_ratio))
 
-#             rr_start_idx_clean = clean_rr_map[rr_start_idx_orig]
-#             rr_end_idx_clean = clean_rr_map[rr_end_idx_orig]
+            rr_start_idx_clean = clean_rr_map[rr_start_idx_orig]
+            rr_end_idx_clean = clean_rr_map[rr_end_idx_orig]
 
-#             if rr_start_idx_clean <= rr_end_idx_clean:
-#                 rr_slice = rr_labels[rr_start_idx_clean : rr_end_idx_clean + 1]
+            if rr_start_idx_clean <= rr_end_idx_clean:
+                rr_slice = rr_labels[rr_start_idx_clean : rr_end_idx_clean + 1]
                 
-#                 if np.isnan(rr_slice).any():
-#                     continue
-#                 # Check if len(rr_slice) > 0, corrected from len(rr_slice > 0)
-#                 if len(rr_slice) > 0:
-#                     # average_rr = np.mean(rr_slice)
-#                     average_rr = rr_slice
-#                     final_rr_labels.append(average_rr)
-#                     ppg_segment_normalized = normalize_signal(ppg_segment)
-#                     ppg_segments.append(ppg_segment_normalized)
-#                     # ppg_segments.append(ppg_segment)
+                if np.isnan(rr_slice).any():
+                    continue
+                # Check if len(rr_slice) > 0, corrected from len(rr_slice > 0)
+                if len(rr_slice) > 0:
+                    # average_rr = np.mean(rr_slice)
+                    average_rr = rr_slice
+                    final_rr_labels.append(average_rr)
+                    ppg_segment_normalized = normalize_signal(ppg_segment)
+                    ppg_segments.append(ppg_segment_normalized)
+                    # ppg_segments.append(ppg_segment)
 
-#     return ppg_segments, final_rr_labels
+    return ppg_segments, final_rr_labels
 
 
 def create_segments_simple(subject_id, ppg_signal, rr_labels, ppg_fs, rr_fs, window_size_sec, overlap_sec):
@@ -945,81 +945,77 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         if dataset_name == "bidmc":
             original_rate = 125
 
-        # check_effect = False
+        check_effect = False
         
-        # if cfg.preprocessing.use_denoiser:
-        #     logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
-        #     if cfg.preprocessing.use_edpa:
-        #         logger.info(f"Subject {i:02}: Running with EDPA denoising ENABLED.")
-        #         _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
-        #         if merged_segments:
-        #             ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
-        #             expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
-        #             ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
-        #             rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
-        #         else:
-        #             logger.info(f"for this subject {i} there is no noise detected!")
-        #             expanded_removed_segments = []
-        #             ppg_denoised = ppg
-        #             rr_labels_denoised = rr
-        #     elif cfg.preprocessing.use_wavelet_denoising:
-        #         logger.info(f"Subject {i:02}: Running with wavelet denoising ENABLED.")
-        #         ppg_denoised = denoise_ppg_with_wavelet(ppg)
-        #         rr_labels_denoised = rr
-        #         expanded_removed_segments = []
-        # else:
-        #     # This is the ablation path: the denoiser is skipped entirely.
-        #     logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
-        #     ppg_denoised = ppg
-        #     rr_labels_denoised = rr
-        #     expanded_removed_segments = []
-        ppg_denoised = ppg
+        if cfg.preprocessing.use_denoiser:
+            logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
+            if cfg.preprocessing.use_edpa:
+                logger.info(f"Subject {i:02}: Running with EDPA denoising ENABLED.")
+                _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
+                if merged_segments:
+                    ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
+                    expanded_removed_segments = expand_removals_to_second_blocks(segments_to_remove, fs=original_rate)
+                    ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
+                    rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
+                else:
+                    logger.info(f"for this subject {i} there is no noise detected!")
+                    expanded_removed_segments = []
+                    ppg_denoised = ppg
+                    rr_labels_denoised = rr
+            elif cfg.preprocessing.use_wavelet_denoising:
+                logger.info(f"Subject {i:02}: Running with wavelet denoising ENABLED.")
+                ppg_denoised = denoise_ppg_with_wavelet(ppg)
+                rr_labels_denoised = rr
+                expanded_removed_segments = []
+        else:
+            # This is the ablation path: the denoiser is skipped entirely.
+            logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
+            ppg_denoised = ppg
+            rr_labels_denoised = rr
+            expanded_removed_segments = []
+
         ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
         if np.any(np.isnan(ppg_filtered)):
             logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
 
         # # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
+        if cfg.preprocessing.remove_outliers:
+            ppg_cliped,lower_band, higher_band = remove_outliers(ppg_filtered)
+            # check_outliers_removal_effect(ppg_filtered, ppg_cliped, original_rate, lower_band, higher_band)
+        else:
+            ppg_cliped = ppg_filtered
 
-        # ppg_cliped,lower_band, higher_band = remove_outliers(ppg_filtered)
-        # # check_outliers_removal_effect(ppg_filtered, ppg_cliped, original_rate, lower_band, higher_band)
 
-
-        # ppg_cliped = ppg
-        # rr_labels_denoised = rr
-        # expanded_removed_segments = []
+       
 
         # ppg_normalized = normalize_signal(ppg_cliped)
         # check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
 
-        ppg_normalized = ppg_filtered
-        rr_labels_denoised = rr
-        expanded_removed_segments = []
-
         subject_id = f"{i:02}"
-        ppg_segments, rr_segments = create_segments_simple(subject_id, ppg_normalized, rr_labels_denoised,
-                                                            ppg_fs=original_rate, rr_fs=1, window_size_sec=cfg.training.window_size, overlap_sec=cfg.training.overlap)
-        # ppg_segments, rr_segments = create_segments_with_gap_handling(
-        #     subject_id,
-        #     ppg_normalized,
-        #     rr_labels_denoised,
-        #     original_len=len(ppg),
-        #     removed_segments=expanded_removed_segments,
-        #     ppg_fs=original_rate,
-        #     rr_fs=1,
-        #     window_size_sec=32,
-        #     step_size_sec=16
-        # )
+
+        if cfg.preprocessing.use_denoiser and cfg.preprocessing.use_edpa:
+            ppg_segments, rr_segments = create_segments_with_gap_handling(
+                subject_id,
+                ppg_cliped,
+                rr_labels_denoised,
+                original_len=len(ppg),
+                removed_segments=expanded_removed_segments,
+                ppg_fs=original_rate,
+                rr_fs=1,
+                window_size_sec=32,
+                step_size_sec=16
+            )
+        else:
+            ppg_segments, rr_segments = create_segments_simple(subject_id, ppg_cliped, rr_labels_denoised,ppg_fs=original_rate,
+                                                     rr_fs=1, window_size_sec=cfg.training.window_size, overlap_sec=cfg.training.overlap)
+        
         
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
         n_jobs = max(1, cpu_count() - 6)
         logger.info(f"Compute frequency segments for subject {subject_id}")
         freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
         # check_freq_features(freq_segments, rr_segments, subject_id)
-        # processed_data.append({
-        #     "subject_id": subject_id,
-        #     "PPG": X,
-        #     "RR": y
-        # })
+  
 
         processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments)
         # logger.info(f"processed data is {processed_data}")
