@@ -28,6 +28,8 @@ import json
 from pytorch_lightning.strategies import DDPStrategy
 from skimage.transform import resize
 import torch.distributed as dist
+from sklearn.model_selection import KFold
+import random
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -1146,6 +1148,60 @@ def create_balanced_folds(processed_data, n_splits=5):
 
     return cv_splits
 
+
+def create_folds(processed_data, n_splits=5, seed=42):
+
+    # Fix random seeds for reproducibility
+    np.random.seed(seed)
+    random.seed(seed)
+
+    all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items())
+    subjects_array = np.array(list(all_subjects))
+            
+    # Shuffle subjects
+    shuffled_indices = np.random.permutation(len(list(all_subjects)))
+    shuffled_subjects = subjects_array[shuffled_indices]
+    
+    # Create k-fold splits
+    kfold = KFold(n_splits=n_splits, shuffle=False, random_state=None)  # Already shuffled
+    cv_splits = []
+    for fold_id, (train_val_indices, test_indices) in enumerate(kfold.split(shuffled_subjects)):
+        train_val_subjects = shuffled_subjects[train_val_indices].tolist()
+        test_subjects = shuffled_subjects[test_indices].tolist()
+        
+        n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
+        random.seed(seed + fold_id)  # make per-fold val split deterministic
+        val_subjects = random.sample(train_val_subjects, n_val_subjects)
+        train_subjects = [s for s in train_val_subjects if s not in val_subjects]
+        
+
+        test_set = set(test_subjects)
+        val_set = set(val_subjects)
+        train_set = set(train_subjects)
+
+        overlap_test_val = test_set & val_set
+        overlap_test_train = test_set & train_set
+        overlap_val_train = val_set & train_set
+
+        logger.info(f"Fold {fold_id+1} overlap between test and val: {overlap_test_val}")
+        logger.info(f"Fold {fold_id+1} overlap between test and train: {overlap_test_train}")
+        logger.info(f"Fold {fold_id+1} overlap between validation and train: {overlap_val_train}")
+
+        union = train_set | val_set | test_set
+        coverage = union == all_subjects
+        missing_subjects = all_subjects - union if not coverage else set()
+
+        logger.info(f"Fold {fold_id+1} covers all subjects: {coverage}")
+        logger.info(f"Fold {fold_id+1} missing subjects: {missing_subjects}")
+
+        cv_splits.append({
+            "train_subjects": train_subjects,
+            "val_subjects": val_subjects,
+            "test_subjects": test_subjects,
+            "fold_id": fold_id+1
+        })
+    return cv_splits
+
 def create_data_splits(cv_split, processed_data):
 
     train_subjects = cv_split["train_subjects"]
@@ -1198,8 +1254,12 @@ def create_data_splits(cv_split, processed_data):
     # logger.info(f"train ppg shape: {train_ppg.shape}, train rr shape: {train_rr.shape}")
     # logger.info(f"val ppg shape: {val_ppg.shape}, val rr shape: {val_rr.shape}")
     # logger.info(f"test ppg shape: {test_ppg.shape}, test rr shape: {test_rr.shape}")
+    id = cv_split["fold_id"]
+    logger.info(f"total number of segments in this fold {id} is {len(train_ppg)+len(val_ppg)+len(test_ppg)}")
+    logger.info(f"number of train segments is {len(train_ppg)}, number of val segments is{len(val_ppg)}, number of test segments is{len(test_ppg)}")
 
-
+    logger.info(f"total number of subjects in this fold {id} is {len(train_subjects)+len(validation_subjects)+len(test_subjects)}")
+    logger.info(f"number of train subjects is {len(train_subjects)}, number of val subjects is{len(validation_subjects)}, number of test subjects is{len(test_subjects)}")
     return {
         'train_ppg': train_ppg,
         'train_rr': train_rr,
@@ -1568,11 +1628,12 @@ def main(cfg: DictConfig):
         logger.info("Skipping CapnoBase dataset loading as per config.")
 
 
-    cv_splits = create_balanced_folds(processed_data, n_splits=5)
+    # cv_splits = create_balanced_folds(processed_data, n_splits=5)
+    cv_splits = create_folds(processed_data, n_splits=5)
     logger.info(f"Created folds: {cv_splits}")
 
     all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl)
-
+    
     for fold_result in all_fold_results:
         logger.info(f"Fold {fold_result['fold_id']} test results: {fold_result['test_results']}")
 
