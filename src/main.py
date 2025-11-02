@@ -987,9 +987,6 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         else:
             ppg_cliped = ppg_filtered
 
-
-       
-
         # ppg_normalized = normalize_signal(ppg_cliped)
         # check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
 
@@ -1149,14 +1146,14 @@ def create_balanced_folds(processed_data, n_splits=5):
     return cv_splits
 
 
-def create_folds(processed_data, n_splits=5, seed=42):
+def create_folds(processed_data, n_splits=10, seed=42):
 
     # Fix random seeds for reproducibility
     np.random.seed(seed)
     random.seed(seed)
 
     all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items())
-    subjects_array = np.array(list(all_subjects))
+    subjects_array = np.array(sorted(all_subjects))
             
     # Shuffle subjects
     shuffled_indices = np.random.permutation(len(list(all_subjects)))
@@ -1169,7 +1166,8 @@ def create_folds(processed_data, n_splits=5, seed=42):
         train_val_subjects = shuffled_subjects[train_val_indices].tolist()
         test_subjects = shuffled_subjects[test_indices].tolist()
         
-        n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
+        # n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
+        n_val_subjects = len(test_subjects)
         random.seed(seed + fold_id)  # make per-fold val split deterministic
         val_subjects = random.sample(train_val_subjects, n_val_subjects)
         train_subjects = [s for s in train_val_subjects if s not in val_subjects]
@@ -1629,7 +1627,7 @@ def main(cfg: DictConfig):
 
 
     # cv_splits = create_balanced_folds(processed_data, n_splits=5)
-    cv_splits = create_folds(processed_data, n_splits=5)
+    cv_splits = create_folds(processed_data, n_splits=10)
     logger.info(f"Created folds: {cv_splits}")
 
     all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl)
