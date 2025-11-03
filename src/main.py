@@ -1292,7 +1292,7 @@ class FirstBatchTimer(pl.Callback):
 def setup_callbacks(cfg,fold_id):
     filename_prefix = f"best-checkpoint-fold{fold_id}-"
     checkpoint_callback = ModelCheckpoint(
-        monitor='val_mae',
+        monitor='val/MAE',
         dirpath=cfg.training.checkpoint_dir,
         filename=filename_prefix + '{epoch:02d}-{val_mae:.2f}',
         save_top_k=1,
@@ -1301,7 +1301,7 @@ def setup_callbacks(cfg,fold_id):
         verbose=True
     )
     early_stopping_callback = EarlyStopping(
-        monitor='val_mae',
+        monitor='val/MAE',
         patience=cfg.training.early_stopping_patience,
         mode='min',
         min_delta=0.001,
