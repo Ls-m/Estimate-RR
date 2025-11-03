@@ -1630,6 +1630,24 @@ def main(cfg: DictConfig):
     cv_splits = create_folds(processed_data, n_splits=10)
     logger.info(f"Created folds: {cv_splits}")
 
+
+    # Collect all test subjects across folds
+    all_test_subjects = set()
+    for fold in cv_splits:
+        all_test_subjects.update(fold["test_subjects"])
+
+    # Collect all subjects in the dataset
+    all_subjects = set(processed_data.keys())
+
+    # Check coverage
+    missing_subjects = all_subjects - all_test_subjects
+    extra_subjects = all_test_subjects - all_subjects
+
+    print(f"✅ Total subjects: {len(all_subjects)}")
+    print(f"✅ Subjects covered in test sets: {len(all_test_subjects)}")
+    print(f"🧩 Missing subjects in test folds: {missing_subjects if missing_subjects else 'None'}")
+    print(f"⚠️ Unexpected subjects: {extra_subjects if extra_subjects else 'None'}")
+    
     all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl)
     
     for fold_result in all_fold_results:
