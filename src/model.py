@@ -488,6 +488,8 @@ class RRLightningModule(pl.LightningModule):
             "MAE": torchmetrics.MeanAbsoluteError(),
             "MSE": torchmetrics.MeanSquaredError()
         }
+        self.train_metrics = torchmetrics.MetricCollection(metrics, prefix="train/")
+        self.val_metrics = torchmetrics.MetricCollection(metrics, prefix="val/")
         self.test_metrics = torchmetrics.MetricCollection(metrics, prefix="test/")
 
         self.cfg = cfg.training
@@ -495,9 +497,9 @@ class RRLightningModule(pl.LightningModule):
         self.weight_decay = cfg.training.weight_decay
         self.scheduler = cfg.training.scheduler
         self.freq_bins = cfg.training.n_freq_bins
-        self.training_step_outputs = []
-        self.validation_step_outputs = []
-        self.test_step_outputs = []
+        # self.training_step_outputs = []
+        # self.validation_step_outputs = []
+        # self.test_step_outputs = []
         self.ablation_mode = cfg.training.ablation_mode
 
         print(f"---------- Initializing with Ablation Mode: {self.ablation_mode} ----------")
@@ -619,29 +621,33 @@ class RRLightningModule(pl.LightningModule):
         self.log("lr", current_lr, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
 
-        # Store outputs for epoch-end calculations
-        self.training_step_outputs.append({
-            'train_loss': loss.detach().cpu(),
-            'pred': rr_pred.detach().cpu(),
-            'target': rr.detach().cpu()
-        })
+        # --- FIX 3: Use torchmetrics ---
+        # This is DDP-safe. It logs 'train/MAE' and 'train/MSE'.
+        metrics = self.train_metrics(rr_pred, rr)
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
+        # --- End Fix 3 ---
 
+        # We log 'train/MAE' now, so ModelCheckpoint can use 'val_mae' (which we will log in val_step)
+        # We MUST log 'train/MAE' (or 'val_mae') with 'on_epoch=True' for the callbacks to work.
+        # Naming convention: PL will auto-name 'val/MAE' to 'val_mae' for callbacks.
+        
         return loss
+
     
 
-    def on_train_epoch_end(self):
-        if not self.training_step_outputs:
-            return
-        avg_loss = torch.stack([x['train_loss'] for x in self.training_step_outputs]).mean()
-        preds = torch.cat([x['pred'] for x in self.training_step_outputs], dim=0)
-        targets = torch.cat([x['target'] for x in self.training_step_outputs], dim=0)
-        mae = torch.mean(torch.abs(preds - targets))
+    # def on_train_epoch_end(self):
+    #     if not self.training_step_outputs:
+    #         return
+    #     avg_loss = torch.stack([x['train_loss'] for x in self.training_step_outputs]).mean()
+    #     preds = torch.cat([x['pred'] for x in self.training_step_outputs], dim=0)
+    #     targets = torch.cat([x['target'] for x in self.training_step_outputs], dim=0)
+    #     mae = torch.mean(torch.abs(preds - targets))
 
-        # self.log('train_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
-        self.log('train_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
+    #     # self.log('train_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+    #     self.log('train_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
-        # Clear outputs
-        self.training_step_outputs.clear()
+    #     # Clear outputs
+    #     self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
         ppg, rr, freq = batch
@@ -651,28 +657,28 @@ class RRLightningModule(pl.LightningModule):
         loss = self.criterion(rr_pred, rr)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
 
-        # Store outputs for epoch-end calculations
-        self.validation_step_outputs.append({
-            'val_loss': loss.detach().cpu(),
-            'pred': rr_pred.detach().cpu(),
-            'target': rr.detach().cpu()
-        })
+        # --- FIX 5: Use torchmetrics ---
+        # This is DDP-safe. It logs 'val/MAE' and 'val/MSE'.
+        # PL automatically creates 'val_mae' for callbacks from 'val/MAE'.
+        metrics = self.val_metrics(rr_pred, rr)
+        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
+        # --- End Fix 5 ---
 
         return loss
     
-    def on_validation_epoch_end(self):
-        if not self.validation_step_outputs:
-            return
-        avg_loss = torch.stack([x['val_loss'] for x in self.validation_step_outputs]).mean()
-        preds = torch.cat([x['pred'] for x in self.validation_step_outputs], dim=0)
-        targets = torch.cat([x['target'] for x in self.validation_step_outputs], dim=0)
-        mae = torch.mean(torch.abs(preds - targets))
+    # def on_validation_epoch_end(self):
+    #     if not self.validation_step_outputs:
+    #         return
+    #     avg_loss = torch.stack([x['val_loss'] for x in self.validation_step_outputs]).mean()
+    #     preds = torch.cat([x['pred'] for x in self.validation_step_outputs], dim=0)
+    #     targets = torch.cat([x['target'] for x in self.validation_step_outputs], dim=0)
+    #     mae = torch.mean(torch.abs(preds - targets))
 
-        # self.log('val_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
-        self.log('val_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
+    #     # self.log('val_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
+    #     self.log('val_mae', mae.to(self.device), on_epoch=True, prog_bar=True, sync_dist=True)
 
-        # Clear outputs
-        self.validation_step_outputs.clear()
+    #     # Clear outputs
+    #     self.validation_step_outputs.clear()
 
     
     def test_step(self, batch, batch_idx):

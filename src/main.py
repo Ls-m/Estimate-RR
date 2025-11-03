@@ -1435,7 +1435,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
         fold_data = create_data_splits(cv_split, processed_data)
         train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
-        augment=False)
+        augment=cfg.training.use_augmentation)
         val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
         augment=False)
         test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'],
@@ -1647,7 +1647,7 @@ def main(cfg: DictConfig):
     print(f"✅ Subjects covered in test sets: {len(all_test_subjects)}")
     print(f"🧩 Missing subjects in test folds: {missing_subjects if missing_subjects else 'None'}")
     print(f"⚠️ Unexpected subjects: {extra_subjects if extra_subjects else 'None'}")
-    
+
     all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl)
     
     for fold_result in all_fold_results:
