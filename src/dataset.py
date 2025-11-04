@@ -35,7 +35,7 @@ class PPGRRDataset(Dataset):
             if torch.rand(1) < 0.5:
                 noise_std = self.cfg.training.noise_std * np.std(ppg_segment)
                 if noise_std > 1e-4: # Avoid adding noise to a flat-line signal
-                    noise = np.random.normal(mean=0, scale=noise_std, size=ppg_segment.shape)
+                    noise = np.random.normal(loc=0, scale=noise_std, size=ppg_segment.shape)
                     ppg_segment += noise
                 
             
