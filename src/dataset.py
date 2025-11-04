@@ -31,16 +31,19 @@ class PPGRRDataset(Dataset):
         freq = self.freq_data[idx]
 
         if self.augment:
+            ppg_segment = np.array(ppg_segment, dtype=np.float32)
             if torch.rand(1) < 0.5:
                 noise_std = self.cfg.training.noise_std * np.std(ppg_segment)
                 if noise_std > 1e-4: # Avoid adding noise to a flat-line signal
-                    noise = np.random.normal(mean=0, scale=noise_std, size=len(ppg_segment))
+                    noise = np.random.normal(mean=0, scale=noise_std, size=ppg_segment.shape)
                     ppg_segment += noise
                 
             
             if torch.rand(1) < 0.5:
                 scale_factor = np.random.uniform(0.8, 1.2)  
                 ppg_segment = ppg_segment * scale_factor
+
+            ppg_segment = ppg_segment.tolist()
         
         ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32)
         rr_tensor = torch.tensor(rr, dtype=torch.float32)
