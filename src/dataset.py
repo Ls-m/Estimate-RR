@@ -8,11 +8,12 @@ logger = logging.getLogger("Dataset")
 
 
 class PPGRRDataset(Dataset):
-    def __init__(self, ppg_data, rr_data, freq_data, augment=False):
+    def __init__(self, cfg, ppg_data, rr_data, freq_data, augment=False):
         self.ppg_data = ppg_data
         self.rr_data = rr_data
         self.freq_data = freq_data
         self.augment = augment
+        self.cfg = cfg
 
         if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
             logger.info(f"nan or inf in ppg_data")
@@ -31,7 +32,7 @@ class PPGRRDataset(Dataset):
 
         if self.augment:
             if torch.rand(1) < 0.5:
-                noise_std = 0.05 * np.std(ppg_segment)
+                noise_std = self.cfg.training.noise_std * np.std(ppg_segment)
                 if noise_std > 1e-4: # Avoid adding noise to a flat-line signal
                     noise = np.random.normal(mean=0, scale=noise_std, size=ppg_segment.shape)
                     ppg_segment += noise

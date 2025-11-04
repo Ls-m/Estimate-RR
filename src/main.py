@@ -1434,11 +1434,11 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         logger.info(f"--- Starting Fold {fold_id} ---")
 
         fold_data = create_data_splits(cv_split, processed_data)
-        train_dataset = PPGRRDataset(fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
+        train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
         augment=cfg.training.use_augmentation)
-        val_dataset = PPGRRDataset(fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
+        val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
         augment=False)
-        test_dataset = PPGRRDataset(fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'],
+        test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'],
         augment=False)
 
         batch_size = cfg.training.batch_size
