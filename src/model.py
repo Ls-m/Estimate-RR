@@ -693,22 +693,22 @@ class RRLightningModule(pl.LightningModule):
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
         # self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         # # Store outputs for epoch-end calculations
-        self.test_step_outputs.append({
-            'test_loss': loss.detach().cpu(),
-            'pred': rr_pred.detach().cpu(),
-            'target': rr.detach().cpu()
-        })
+        # self.test_step_outputs.append({
+        #     'test_loss': loss.detach().cpu(),
+        #     'pred': rr_pred.detach().cpu(),
+        #     'target': rr.detach().cpu()
+        # })
         
         return loss
     
-    def on_test_epoch_end(self):
-        if not self.test_step_outputs:
-            return
-        avg_loss = torch.stack([x['test_loss'] for x in self.test_step_outputs]).mean()
-        preds = torch.cat([x['pred'] for x in self.test_step_outputs], dim=0)
-        targets = torch.cat([x['target'] for x in self.test_step_outputs], dim=0)
-        print(f"preds are: {preds}")
-        print(f"targets are: {targets}")
+    # def on_test_epoch_end(self):
+    #     if not self.test_step_outputs:
+    #         return
+    #     avg_loss = torch.stack([x['test_loss'] for x in self.test_step_outputs]).mean()
+    #     preds = torch.cat([x['pred'] for x in self.test_step_outputs], dim=0)
+    #     targets = torch.cat([x['target'] for x in self.test_step_outputs], dim=0)
+    #     print(f"preds are: {preds}")
+    #     print(f"targets are: {targets}")
         # mae = torch.mean(torch.abs(preds - targets))
 
         # self.log('test_loss_epoch', avg_loss.to(self.device), prog_bar=False, sync_dist=True)
