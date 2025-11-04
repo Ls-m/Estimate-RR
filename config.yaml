@@ -35,6 +35,7 @@ training:
   window_size: 60
   overlap: 45
   use_augmentation: False
+  noise_std: 0.05
 
 
 logging:
