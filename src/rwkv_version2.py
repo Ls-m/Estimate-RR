@@ -144,12 +144,12 @@ class RWKVBlock(nn.Module):
         # Time mixing with residual connection
         tm_out, new_state = self.time_mixing(self.ln1(x), state)
         # x = x + self.dropout(tm_out)
-        x = x + self.tm_out
+        x = x + tm_out
         
         # Channel mixing with residual connection
         cm_out = self.channel_mixing(self.ln2(x))
         # x = x + self.dropout(cm_out)
-        x = x + self.cm_out
+        x = x + cm_out
         
         return x, new_state
 
@@ -214,61 +214,62 @@ class RWKV(nn.Module):
         x = self.ln_out(x)
         
         # Return final representation (last time step) - SAME AS YOUR ORIGINAL
-        # return x[:, -1, :]  # (batch_size, hidden_size)
-        return x  # (batch_size, hidden_size)
+        return x[:, -1, :]  # (batch_size, hidden_size)
+        # return x  # (batch_size, hidden_size)
     
 
-
-# class RWKVRRModel(nn.Module):
-#     """RWKV model for respiratory rate estimation - SAME OUTPUT SHAPE AS ORIGINAL."""
-    
-#     def __init__(self, input_size=1, hidden_size=128, num_layers=2, output_size=64, dropout=0.2):
-#         super().__init__()
-#         self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout=dropout)
-#         self.fc = nn.Linear(hidden_size, output_size)
-
-#     def forward(self, x):
-#         """
-#         Forward pass - EXACTLY SAME AS YOUR ORIGINAL MODEL.
-        
-#         Args:
-#             x: Input PPG signal (B, T, 1)
-            
-#         Returns:
-#             Output tensor (B, output_size) - SAME SHAPE AS ORIGINAL
-#         """
-#         # x: (B, T, 1)
-#         rwkv_out = self.rwkv(x)        # returns (B, hidden_size)
-#         out = self.fc(rwkv_out)        # map to embedding dimension (B, output_size)
-#         return out
 
 class RWKVRRModel(nn.Module):
-    def __init__(self, input_size=1, hidden_size=128, num_layers=2, dropout=0.2):
+    """RWKV model for respiratory rate estimation - SAME OUTPUT SHAPE AS ORIGINAL."""
+    
+    def __init__(self, input_size=1, hidden_size=2048, num_layers=1, output_size=512, dropout=0):
         super().__init__()
-        self.input_convs = nn.ModuleList([
-            nn.Conv1d(1, hidden_size // 4, kernel_size=k, padding=k // 2)
-            for k in [3, 7, 15, 31]
-        ])
-        self.conv_bn = nn.BatchNorm1d(hidden_size)  # normalize concatenated conv features
-        self.conv_act = nn.ReLU()
-        self.rwkv = RWKV(hidden_size, hidden_size, num_layers, dropout=dropout)
-        self.temporal_pool = nn.AdaptiveAvgPool1d(32)
-        self.fc = nn.Linear(hidden_size, 1)
+        self.rwkv = RWKV(input_size, hidden_size, num_layers, dropout=dropout)
+        self.fc = nn.Linear(hidden_size, output_size)
 
     def forward(self, x):
-        x = x.transpose(1, 2)  # (B, 1, 4000) for Conv1d
+        """
+        Forward pass - EXACTLY SAME AS YOUR ORIGINAL MODEL.
+        
+        Args:
+            x: Input PPG signal (B, T, 1)
+            
+        Returns:
+            Output tensor (B, output_size) - SAME SHAPE AS ORIGINAL
+        """
+        # x: (B, T, 1)
+        x = x.unsqueeze(-1)
+        rwkv_out = self.rwkv(x)        # returns (B, hidden_size)
+        out = self.fc(rwkv_out)        # map to embedding dimension (B, output_size)
+        return out
 
-        # Apply multi-scale convolutions
-        conv_outs = [conv(x) for conv in self.input_convs]   # list of (B, hidden_size//4, 4000)
-        x = torch.cat(conv_outs, dim=1)                      # (B, hidden_size, 4000)
-        x = self.conv_bn(x)
-        x = self.conv_act(x)
+# class RWKVRRModel(nn.Module):
+#     def __init__(self, input_size=1, hidden_size=128, num_layers=2, dropout=0.2):
+#         super().__init__()
+#         self.input_convs = nn.ModuleList([
+#             nn.Conv1d(1, hidden_size // 4, kernel_size=k, padding=k // 2)
+#             for k in [3, 7, 15, 31]
+#         ])
+#         self.conv_bn = nn.BatchNorm1d(hidden_size)  # normalize concatenated conv features
+#         self.conv_act = nn.ReLU()
+#         self.rwkv = RWKV(hidden_size, hidden_size, num_layers, dropout=dropout)
+#         self.temporal_pool = nn.AdaptiveAvgPool1d(32)
+#         self.fc = nn.Linear(hidden_size, 1)
 
-        # Prepare for RWKV input
-        x = x.transpose(1, 2)  # (B, 4000, hidden_size)
-        x = self.rwkv(x)                  # (B, 4000, hidden_size)
-        x = x.transpose(1, 2)             # (B, hidden_size, 4000)
-        x = self.temporal_pool(x)         # (B, hidden_size, 32)
-        x = x.transpose(1, 2)             # (B, 32, hidden_size)
-        out = self.fc(x)                  # (B, 32, 1)
-        return out.squeeze(-1)            # (B, 32)
+#     def forward(self, x):
+#         x = x.transpose(1, 2)  # (B, 1, 4000) for Conv1d
+
+#         # Apply multi-scale convolutions
+#         conv_outs = [conv(x) for conv in self.input_convs]   # list of (B, hidden_size//4, 4000)
+#         x = torch.cat(conv_outs, dim=1)                      # (B, hidden_size, 4000)
+#         x = self.conv_bn(x)
+#         x = self.conv_act(x)
+
+#         # Prepare for RWKV input
+#         x = x.transpose(1, 2)  # (B, 4000, hidden_size)
+#         x = self.rwkv(x)                  # (B, 4000, hidden_size)
+#         x = x.transpose(1, 2)             # (B, hidden_size, 4000)
+#         x = self.temporal_pool(x)         # (B, hidden_size, 32)
+#         x = x.transpose(1, 2)             # (B, 32, hidden_size)
+#         out = self.fc(x)                  # (B, 32, 1)
+#         return out.squeeze(-1)            # (B, 32)
