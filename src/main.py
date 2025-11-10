@@ -1328,7 +1328,7 @@ def setup_callbacks(cfg,fold_id):
         min_delta=0.001,
         verbose=True
     )
-    return [checkpoint_callback]
+    return [checkpoint_callback, early_stopping_callback]
 
 
 def extract_all_segments(processed_data_dict):
