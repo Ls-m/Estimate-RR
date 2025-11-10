@@ -854,7 +854,10 @@ def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, f
     else:
         # Handle the case of a constant-value image
         normalized_scalogram = np.zeros(image_size)
-        
+    # plt.imshow(normalized_scalogram, cmap='viridis', aspect='auto')
+    # plt.axis('off')
+    # plt.show()
+    # exit()
     return normalized_scalogram.astype(np.float32)
 
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
@@ -1166,8 +1169,8 @@ def create_folds(processed_data, n_splits=10, seed=42):
         train_val_subjects = shuffled_subjects[train_val_indices].tolist()
         test_subjects = shuffled_subjects[test_indices].tolist()
         
-        # n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
-        n_val_subjects = len(test_subjects)
+        n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
+        # n_val_subjects = len(test_subjects)
         random.seed(seed + fold_id)  # make per-fold val split deterministic
         val_subjects = random.sample(train_val_subjects, n_val_subjects)
         train_subjects = [s for s in train_val_subjects if s not in val_subjects]
@@ -1627,7 +1630,7 @@ def main(cfg: DictConfig):
 
 
     # cv_splits = create_balanced_folds(processed_data, n_splits=5)
-    cv_splits = create_folds(processed_data, n_splits=10)
+    cv_splits = create_folds(processed_data, n_splits=5)
     logger.info(f"Created folds: {cv_splits}")
 
 
