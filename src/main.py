@@ -820,8 +820,11 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     return psd_band.astype(np.float32)
 
-def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, fmax=0.6, wavelet='morl'):
-    
+def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
+    if use_fake or ppg_segment is None:
+        # Generate fake normalized data
+        fake_scalogram = np.random.rand(*image_size).astype(np.float32)
+        return fake_scalogram
     # --- 1. Calculate CWT Coefficients ---
     dt = 1.0 / fs
     # Define the scales corresponding to the frequency range
@@ -863,7 +866,7 @@ def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, f
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
     def process_single(segment):
-        return generate_cwt_scalogram(segment, fs)
+        return generate_cwt_scalogram(segment, fs, use_fake=True)
         # return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
@@ -972,6 +975,21 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
                 ppg_denoised = denoise_ppg_with_wavelet(ppg)
                 rr_labels_denoised = rr
                 expanded_removed_segments = []
+
+                # # Plot first 3 seconds
+                # time_window = 0.1  # seconds
+                # num_samples = int(time_window * original_rate)
+                # t = np.arange(len(ppg)) / original_rate
+                # plt.figure(figsize=(10, 5))
+                # plt.plot(t[:num_samples], ppg[:num_samples], label='Raw PPG', alpha=0.7)
+                # plt.plot(t[:num_samples], ppg_denoised[:num_samples], label='Denoised PPG', linewidth=2)
+                # plt.title('PPG Signal Before and After Wavelet Denoising (First 100 ms)')
+                # plt.xlabel('Time (s)')
+                # plt.ylabel('Amplitude')
+                # plt.legend()
+                # plt.grid(True)
+                # plt.tight_layout()
+                # plt.show()
         else:
             # This is the ablation path: the denoiser is skipped entirely.
             logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
@@ -983,7 +1001,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         if np.any(np.isnan(ppg_filtered)):
             logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
 
-        # # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
+        # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
         if cfg.preprocessing.remove_outliers:
             ppg_cliped,lower_band, higher_band = remove_outliers(ppg_filtered)
             # check_outliers_removal_effect(ppg_filtered, ppg_cliped, original_rate, lower_band, higher_band)

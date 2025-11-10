@@ -55,7 +55,8 @@ class LSTMRRModel(nn.Module):
         return out
     
 class LinearModel(nn.Module):
-    def __init__(self, input_size=60*125, hidden_size=2048, output_size=512, dropout=0):
+    def __init__(self, input_size=60*125, 
+          hidden_size=2048, output_size=512, dropout=0):
         super(LinearModel, self).__init__()
         self.model = nn.Sequential(
             nn.Linear(input_size, hidden_size),
@@ -515,7 +516,7 @@ class RRLightningModule(pl.LightningModule):
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
-                model = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=cfg.training.dropout)
+                model = RWKVRRModel(input_size=1, hidden_size=512, num_layers=1, dropout=cfg.training.dropout)
             elif model_name == "RWKVTime":
                 model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=cfg.training.dropout)
             # elif model_name == "OptimizedRWKVRRModel":
