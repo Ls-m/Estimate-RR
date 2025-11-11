@@ -866,7 +866,7 @@ def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, f
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
     def process_single(segment):
-        return generate_cwt_scalogram(segment, fs, use_fake=True)
+        return generate_cwt_scalogram(segment, fs, use_fake=False)
         # return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
@@ -997,9 +997,12 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             rr_labels_denoised = rr
             expanded_removed_segments = []
 
-        ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
-        if np.any(np.isnan(ppg_filtered)):
-            logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
+        if cfg.preprocessing.filter:
+            ppg_filtered = apply_bandpass_filter(cfg, ppg_denoised, original_rate)
+            if np.any(np.isnan(ppg_filtered)):
+                logger.info(f"after bandpass filter NaNs in PPG: {np.isnan(ppg_filtered).sum()} ")
+        else:
+            ppg_filtered = ppg_denoised
 
         # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
         if cfg.preprocessing.remove_outliers:
@@ -1012,6 +1015,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
 
         subject_id = f"{i:02}"
+
 
         if cfg.preprocessing.use_denoiser and cfg.preprocessing.use_edpa:
             ppg_segments, rr_segments = create_segments_with_gap_handling(
@@ -1530,7 +1534,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
                     max_epochs=cfg.ssl.max_epochs,
                     accelerator="auto",
                     devices=cfg.hardware.devices,
-                    strategy='ddp_find_unused_parameters_true',
+                    # strategy='ddp_find_unused_parameters_true',
                     # detect_anomaly=True,
                     logger=ssl_logger,
                     log_every_n_steps=1,
@@ -1581,7 +1585,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy='ddp_find_unused_parameters_true',
+                            #  strategy='ddp_find_unused_parameters_true',
                             #  detect_anomaly=True,
                              callbacks=callbacks,
                              logger=tblogger,

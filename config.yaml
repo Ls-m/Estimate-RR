@@ -3,12 +3,12 @@ preprocessing:
     type: "butter"  # Type of bandpass filter: "butter", "cheby1", etc.
     low_freq: 0.1  # Lower frequency for better stability
     high_freq: 0.6   # Higher frequency, well below Nyquist
-    order: 4         # Lower order for better numerical stability
-  use_denoiser: False  # Whether to apply denoising
+    order: 8         # Lower order for better numerical stability
+  use_denoiser: True  # Whether to apply denoising
   use_edpa: False
-  use_wavelet_denoising: False
-  remove_outliers: False  # Whether to remove outliers from the PPG signal
-
+  use_wavelet_denoising: True
+  remove_outliers: True  # Whether to remove outliers from the PPG signal
+  filter: True
 
 
 training:
