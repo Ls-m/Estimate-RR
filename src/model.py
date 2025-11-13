@@ -457,6 +457,8 @@ class AdvancedScalogramEncoder(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(2, 2)
         )
+        # Adaptive pooling to get a fixed-size representation
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         
         with torch.no_grad():
             dummy_input = torch.zeros(1, in_channels, *image_size)
@@ -478,6 +480,8 @@ class AdvancedScalogramEncoder(nn.Module):
             x = x.unsqueeze(1)
             
         features_2d = self.conv_base(x)
+        # pooled = self.avg_pool(features_2d)           # (B, 64, 1, 1)
+        # flattened = pooled.flatten(1)
         feature_vector_1d = self.mlp_head(features_2d)
         return feature_vector_1d
     
@@ -516,7 +520,7 @@ class RRLightningModule(pl.LightningModule):
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
-                model = RWKVRRModel(input_size=1, hidden_size=512, num_layers=1, dropout=cfg.training.dropout)
+                model = RWKVRRModel(input_size=1, hidden_size=512, num_layers=2, dropout=cfg.training.dropout)
             elif model_name == "RWKVTime":
                 model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=cfg.training.dropout)
             # elif model_name == "OptimizedRWKVRRModel":
@@ -568,6 +572,7 @@ class RRLightningModule(pl.LightningModule):
                 print("Training time_model from scratch.")
 
         if self.ablation_mode in ["fusion", "freq_only"]:
+            
             # self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
             self.freq_model = AdvancedScalogramEncoder(
                 image_size=(64, 64), # Make sure this matches your generated images
@@ -756,7 +761,7 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "CosineAnnealingLR":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=2000, eta_min=1e-7)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-6)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
