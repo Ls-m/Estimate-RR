@@ -520,7 +520,7 @@ class RRLightningModule(pl.LightningModule):
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
-                model = RWKVRRModel(input_size=1, hidden_size=512, num_layers=2, dropout=cfg.training.dropout)
+                model = RWKVRRModel(input_size=1, hidden_size=512, num_layers=1, dropout=cfg.training.dropout)
             elif model_name == "RWKVTime":
                 model = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=cfg.training.dropout)
             # elif model_name == "OptimizedRWKVRRModel":
@@ -761,7 +761,7 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "CosineAnnealingLR":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=200, eta_min=1e-6)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=2000, eta_min=1e-7)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
