@@ -666,8 +666,8 @@ def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, origina
                     # average_rr = np.mean(rr_slice)
                     average_rr = rr_slice
                     final_rr_labels.append(average_rr)
-                    ppg_segment_normalized = normalize_signal(ppg_segment)
-                    ppg_segments.append(ppg_segment_normalized)
+                    # ppg_segment_normalized = normalize_signal(ppg_segment)
+                    ppg_segments.append(ppg_segment)
                     # ppg_segments.append(ppg_segment)
 
     return ppg_segments, final_rr_labels
