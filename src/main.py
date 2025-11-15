@@ -863,26 +863,26 @@ def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, f
     # exit()
     return normalized_scalogram.astype(np.float32)
 
-def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
+# def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
-    def process_single(segment):
-        return generate_cwt_scalogram(segment, fs, use_fake=False)
-        # return extract_cwt_features(segment, fs, num_scales=50)
+#     def process_single(segment):
+#         return generate_cwt_scalogram(segment, fs, use_fake=False)
+#         # return extract_cwt_features(segment, fs, num_scales=50)
     
-    freq_features = Parallel(n_jobs=n_jobs)(
-        delayed(process_single)(segment) for segment in tqdm(ppg_segments)
-    )
-    return np.stack(freq_features, axis=0)
+#     freq_features = Parallel(n_jobs=n_jobs)(
+#         delayed(process_single)(segment) for segment in tqdm(ppg_segments)
+#     )
+#     return np.stack(freq_features, axis=0)
 
-# def compute_freq_features(ppg_segments, fs):
-#     freq_features = []
-#     for segment in tqdm(ppg_segments, desc="Computing frequency features"):
-#         # features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
-#         features  = extract_cwt_features(segment, fs, fmin=0.1, fmax=0.6, num_scales=50)
-#         # print("Single segment frequency feature shape:", features.shape)
-#         freq_features.append(features)
-#     freq_features = np.stack(freq_features, axis=0)
-#     return freq_features
+def compute_freq_features(ppg_segments, fs):
+    freq_features = []
+    for segment in tqdm(ppg_segments, desc="Computing frequency features"):
+        features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
+        # features  = extract_cwt_features(segment, fs, fmin=0.1, fmax=0.6, num_scales=50)
+        print("Single segment frequency feature shape:", features.shape)
+        freq_features.append(features)
+    freq_features = np.stack(freq_features, axis=0)
+    return freq_features
 
 def check_freq_features(freq_segments, rr_segments, subject_id):
     logger.info(f"Frequency features shape for subject {subject_id}: {freq_segments.shape}")
@@ -1037,7 +1037,8 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
         n_jobs = max(1, cpu_count() - 6)
         logger.info(f"Compute frequency segments for subject {subject_id}")
-        freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
+        # freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
+        freq_segments = compute_freq_features(ppg_segments, original_rate)
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
 
