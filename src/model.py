@@ -573,11 +573,11 @@ class RRLightningModule(pl.LightningModule):
 
         if self.ablation_mode in ["fusion", "freq_only"]:
             
-            # self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
-            self.freq_model = AdvancedScalogramEncoder(
-                image_size=(64, 64), # Make sure this matches your generated images
-                output_features=self.cfg.freq_model_output_dim # The output vector size
-            )
+            self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
+            # self.freq_model = AdvancedScalogramEncoder(
+            #     image_size=(64, 64), # Make sure this matches your generated images
+            #     output_features=self.cfg.freq_model_output_dim # The output vector size
+            # )
             fusion_dim += self.cfg.freq_model_output_dim
 
         
