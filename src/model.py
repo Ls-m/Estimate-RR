@@ -462,6 +462,28 @@ class PSDPeakDetectorEncoder(nn.Module):
         # expand: (B, hidden)
         return rr_tensor.unsqueeze(1).repeat(1, self.hidden)
 
+class PSDPeakDetectorSeq(nn.Module):
+    def __init__(self, n_bins, fmin, fmax):
+        super().__init__()
+        self.n_bins = n_bins
+        self.fmin = fmin
+        self.fmax = fmax
+
+    def forward(self, x):
+        # x shape: (B, 60, n_bins)
+        B, T, F = x.shape
+
+        x_np = x.detach().cpu().numpy()
+        rr_seq = np.zeros((B, T), dtype=np.float32)
+
+        for b in range(B):
+            for t in range(T):
+                psd = x_np[b, t]
+                peak_idx = np.argmax(psd)
+                freq_hz = self.fmin + (self.fmax - self.fmin) * peak_idx / (F - 1)
+                rr_seq[b, t] = freq_hz * 60.0  # convert to BPM
+
+        return torch.tensor(rr_seq, dtype=torch.float32, device=x.device)
 
 class AdvancedScalogramEncoder(nn.Module):
     """
@@ -603,12 +625,17 @@ class RRLightningModule(pl.LightningModule):
                 print("Training time_model from scratch.")
 
         if self.ablation_mode in ["fusion", "freq_only"]:
-            self.freq_model = PSDPeakDetectorEncoder(
+            self.freq_model = PSDPeakDetectorSeq(
                 n_bins=self.freq_bins,
-                hidden=self.cfg.freq_model_output_dim,
                 fmin=0.1,
                 fmax=0.6
             )
+            # self.freq_model = PSDPeakDetectorEncoder(
+            #     n_bins=self.freq_bins,
+            #     hidden=self.cfg.freq_model_output_dim,
+            #     fmin=0.1,
+            #     fmax=0.6
+            # )
             # self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
             # self.freq_model = AdvancedScalogramEncoder(
             #     image_size=(64, 64), # Make sure this matches your generated images
@@ -644,9 +671,9 @@ class RRLightningModule(pl.LightningModule):
 
         z = torch.cat(features, dim=1)  # (B, fusion_dim)
         
-        out = self.head(z)  # (B,)
-        return out
-        # return z
+        # out = self.head(z)  # (B,)
+        # return out
+        return z
  
     
     def training_step(self, batch, batch_idx):

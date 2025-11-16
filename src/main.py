@@ -874,15 +874,28 @@ def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, f
 #     )
 #     return np.stack(freq_features, axis=0)
 
+# def compute_freq_features(ppg_segments, fs):
+#     freq_features = []
+#     for segment in tqdm(ppg_segments, desc="Computing frequency features"):
+#         features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
+#         # features  = extract_cwt_features(segment, fs, fmin=0.1, fmax=0.6, num_scales=50)
+#         print("Single segment frequency feature shape:", features.shape)
+#         freq_features.append(features)
+#     freq_features = np.stack(freq_features, axis=0)
+#     return freq_features
+
 def compute_freq_features(ppg_segments, fs):
-    freq_features = []
-    for segment in tqdm(ppg_segments, desc="Computing frequency features"):
-        features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
-        # features  = extract_cwt_features(segment, fs, fmin=0.1, fmax=0.6, num_scales=50)
-        print("Single segment frequency feature shape:", features.shape)
-        freq_features.append(features)
-    freq_features = np.stack(freq_features, axis=0)
-    return freq_features
+    freq_segments = []
+    for seg in ppg_segments:    # seg = 60s PPG
+        seg = np.asarray(seg)
+        per_second_feats = []
+        for i in range(60):
+            one_sec = seg[i*fs:(i+1)*fs]
+            psd_feat = extract_freq_features(one_sec, fs, fmin=0.1, fmax=0.6, nperseg=None)
+            per_second_feats.append(psd_feat)
+        per_second_feats = np.stack(per_second_feats)  # (60, n_bins)
+        freq_segments.append(per_second_feats)
+    return np.stack(freq_segments)   # shape (B, 60, n_bins)
 
 def check_freq_features(freq_segments, rr_segments, subject_id):
     logger.info(f"Frequency features shape for subject {subject_id}: {freq_segments.shape}")
