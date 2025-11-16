@@ -13,6 +13,7 @@ from rwkv_version2 import RWKVRRModel
 import torch.distributed as dist
 from typing import Tuple, Optional
 import torchmetrics
+import numpy as np
 
 def ppg_augmentation(x, crop_ratio=0.8):
     """
@@ -432,6 +433,36 @@ class FreqEncoder(nn.Module):
         
 #         return main_output
 
+class PSDPeakDetectorEncoder(nn.Module):
+    def __init__(self, n_bins, hidden, fmin, fmax):
+        super().__init__()
+        self.hidden = hidden
+        self.fmin = fmin
+        self.fmax = fmax
+        self.n_bins = n_bins
+
+    def forward(self, x):
+        # x shape: (B, n_bins)
+        B, F = x.shape
+
+        x_np = x.detach().cpu().numpy()
+        rr_list = np.zeros(B, dtype=np.float32)
+
+        for i in range(B):
+            psd = x_np[i]   # shape: (n_bins,)
+            peak_idx = np.argmax(psd)
+
+            freq_hz = self.fmin + (self.fmax - self.fmin) * peak_idx / (F - 1)
+            rr_bpm = freq_hz * 60.0
+
+            rr_list[i] = rr_bpm
+
+        rr_tensor = torch.tensor(rr_list, device=x.device, dtype=torch.float32)
+
+        # expand: (B, hidden)
+        return rr_tensor.unsqueeze(1).repeat(1, self.hidden)
+
+
 class AdvancedScalogramEncoder(nn.Module):
     """
     A more robust CNN with Batch Normalization and Dropout for better training stability and regularization.
@@ -572,8 +603,13 @@ class RRLightningModule(pl.LightningModule):
                 print("Training time_model from scratch.")
 
         if self.ablation_mode in ["fusion", "freq_only"]:
-            
-            self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
+            self.freq_model = PSDPeakDetectorEncoder(
+                n_bins=self.freq_bins,
+                hidden=self.cfg.freq_model_output_dim,
+                fmin=0.1,
+                fmax=0.6
+            )
+            # self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
             # self.freq_model = AdvancedScalogramEncoder(
             #     image_size=(64, 64), # Make sure this matches your generated images
             #     output_features=self.cfg.freq_model_output_dim # The output vector size
