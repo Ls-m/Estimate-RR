@@ -704,7 +704,7 @@ def create_segments_simple(subject_id, ppg_signal, rr_labels, ppg_fs, rr_fs, win
         # ppg_segment_norm = (ppg_segment - np.mean(ppg_segment)) / (np.std(ppg_segment) + 1e-8)
         ppg_segment_norm = normalize_signal(ppg_segment)
         ppg_segments.append(ppg_segment_norm)
-        rr_segments.append(rr_slice)
+        rr_segments.append(np.mean(rr_slice))
     
     return ppg_segments, rr_segments
 # Place this new function in the same file as your other processing functions
@@ -874,28 +874,28 @@ def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, f
 #     )
 #     return np.stack(freq_features, axis=0)
 
-# def compute_freq_features(ppg_segments, fs):
-#     freq_features = []
-#     for segment in tqdm(ppg_segments, desc="Computing frequency features"):
-#         features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
-#         # features  = extract_cwt_features(segment, fs, fmin=0.1, fmax=0.6, num_scales=50)
-#         print("Single segment frequency feature shape:", features.shape)
-#         freq_features.append(features)
-#     freq_features = np.stack(freq_features, axis=0)
-#     return freq_features
-
 def compute_freq_features(ppg_segments, fs):
-    freq_segments = []
-    for seg in ppg_segments:    # seg = 60s PPG
-        seg = np.asarray(seg)
-        per_second_feats = []
-        for i in range(60):
-            one_sec = seg[i*fs:(i+1)*fs]
-            psd_feat = extract_freq_features(one_sec, fs, fmin=0.1, fmax=0.6, nperseg=None)
-            per_second_feats.append(psd_feat)
-        per_second_feats = np.stack(per_second_feats)  # (60, n_bins)
-        freq_segments.append(per_second_feats)
-    return np.stack(freq_segments)   # shape (B, 60, n_bins)
+    freq_features = []
+    for segment in tqdm(ppg_segments, desc="Computing frequency features"):
+        # features = extract_freq_features(segment, fs, fmin=0.1, fmax=0.6, nperseg=2048)
+        features  = extract_cwt_features(segment, fs, fmin=0.1, fmax=0.6, num_scales=50)
+        print("Single segment frequency feature shape:", features.shape)
+        freq_features.append(features)
+    freq_features = np.stack(freq_features, axis=0)
+    return freq_features
+
+# def compute_freq_features(ppg_segments, fs):
+#     freq_segments = []
+#     for seg in ppg_segments:    # seg = 60s PPG
+#         seg = np.asarray(seg)
+#         per_second_feats = []
+#         for i in range(60):
+#             one_sec = seg[i*fs:(i+1)*fs]
+#             psd_feat = extract_freq_features(one_sec, fs, fmin=0.1, fmax=0.6, nperseg=None)
+#             per_second_feats.append(psd_feat)
+#         per_second_feats = np.stack(per_second_feats)  # (60, n_bins)
+#         freq_segments.append(per_second_feats)
+#     return np.stack(freq_segments)   # shape (B, 60, n_bins)
 
 def check_freq_features(freq_segments, rr_segments, subject_id):
     logger.info(f"Frequency features shape for subject {subject_id}: {freq_segments.shape}")
@@ -1050,8 +1050,8 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
         n_jobs = max(1, cpu_count() - 6)
         logger.info(f"Compute frequency segments for subject {subject_id}")
-        # freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
-        freq_segments = compute_freq_features(ppg_segments, original_rate)
+        freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
+        # freq_segments = compute_freq_features(ppg_segments, original_rate)
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
 
