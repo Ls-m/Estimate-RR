@@ -572,14 +572,14 @@ class FreqSSLPretrainModule(pl.LightningModule):
         scalogram, target_freq = batch
         pred_freq = self.forward(scalogram)
         loss = self.loss_fn(pred_freq, target_freq)
-        self.log('train_loss', loss, prog_bar=True)
+        self.log('train_loss', loss, prog_bar=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         scalogram, target_freq = batch
         pred_freq = self.forward(scalogram)
         loss = self.loss_fn(pred_freq, target_freq)
-        self.log('val_loss', loss, prog_bar=True)
+        self.log('val_loss', loss, prog_bar=True, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
