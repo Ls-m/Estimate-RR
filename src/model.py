@@ -648,7 +648,7 @@ class RRLightningModule(pl.LightningModule):
             nn.Linear(fusion_dim, 128),
             nn.ReLU(),
             nn.Dropout(cfg.training.dropout),
-            nn.Linear(128, 1)
+            nn.Linear(128, 60)
         )
 
         if cfg.training.criterion == "MSELoss":
@@ -685,7 +685,7 @@ class RRLightningModule(pl.LightningModule):
         #     print("this is ppg shape: ", ppg.shape)
         rr_pred = self.forward(ppg, freq)
         # rr_pred = rr_pred.squeeze(-1)
-        loss = self.criterion(rr_pred.squeeze(-1), rr.squeeze(-1))
+        loss = self.criterion(rr_pred, rr)
         current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
         self.log("lr", current_lr, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
@@ -723,7 +723,7 @@ class RRLightningModule(pl.LightningModule):
         bs = ppg.shape[0]
         rr_pred = self.forward(ppg, freq)
         # rr_pred = rr_pred.squeeze(-1)
-        loss = self.criterion(rr_pred.squeeze(-1), rr.squeeze(-1))
+        loss = self.criterion(rr_pred, rr)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
 
         # --- FIX 5: Use torchmetrics ---
@@ -755,7 +755,7 @@ class RRLightningModule(pl.LightningModule):
         bs = ppg.shape[0]
         rr_pred = self.forward(ppg, freq)
         # rr_pred = rr_pred.squeeze(-1)
-        loss = self.criterion(rr_pred.squeeze(-1), rr.squeeze(-1))
+        loss = self.criterion(rr_pred, rr)
 
         self.log('test_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
         metrics = self.test_metrics(rr_pred, rr)
