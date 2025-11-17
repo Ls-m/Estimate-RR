@@ -68,3 +68,83 @@ class PPGRRDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True)
+    
+
+
+import pywt
+import numpy as np
+import torch
+import scipy.signal as signal
+
+def generate_2d_scalogram(ppg_segment, fs=30, fmin=0.1, fmax=0.6, num_scales=64):
+    """
+    Generates a 2D CWT scalogram for the SSL task.
+    Output shape: (num_scales, time_steps)
+    """
+    dt = 1.0 / fs
+    fc = pywt.central_frequency('morl')
+    
+    scale_min = fc / (fmax * dt)
+    scale_max = fc / (fmin * dt)
+    scales = np.linspace(scale_min, scale_max, num_scales)
+    
+    # Apply CWT
+    cwt_coeffs, _ = pywt.cwt(ppg_segment, scales, 'morl', sampling_period=dt)
+    
+    # Take magnitude
+    cwt_img = np.abs(cwt_coeffs)
+    
+    # Resize to fixed size if necessary (e.g., 64x64) to satisfy CNN
+    # We assume input length is fixed (e.g. 60s * 30Hz = 1800 samples). 
+    # We simply downsample the time axis to 64 to make the image square-ish for the CNN.
+    target_time_dim = 64
+    
+    # Simple linear interpolation to resize time dimension
+    cwt_img_tensor = torch.tensor(cwt_img).unsqueeze(0) # (1, H, W_old)
+    cwt_resized = torch.nn.functional.interpolate(
+        cwt_img_tensor.unsqueeze(0), # (1, 1, H, W_old)
+        size=(num_scales, target_time_dim), 
+        mode='bilinear', 
+        align_corners=False
+    )
+    
+    return cwt_resized.squeeze(0).squeeze(0) # Returns (64, 64)
+
+
+class FrequencySSLDataset(torch.utils.data.Dataset):
+    def __init__(self, ppg_segments, fs=30):
+        """
+        ppg_segments: list or array of raw PPG time-domain segments (N, time_steps)
+        """
+        self.ppg_segments = ppg_segments
+        self.fs = fs
+
+    def __len__(self):
+        return len(self.ppg_segments)
+
+    def __getitem__(self, idx):
+        raw_ppg = self.ppg_segments[idx]
+        
+        # 1. REMOVE REAL RESPIRATION
+        # High-pass filter > 0.8 Hz to keep only cardiac, removing real breath
+        sos = signal.butter(4, 0.8, 'hp', fs=self.fs, output='sos')
+        clean_cardiac = signal.sosfilt(sos, raw_ppg)
+        
+        # 2. GENERATE SYNTHETIC BREATH
+        # Random freq between 0.1 (6 bpm) and 0.5 (30 bpm)
+        target_freq = np.random.uniform(0.1, 0.5)
+        
+        # Create modulation wave
+        t = np.arange(len(raw_ppg)) / self.fs
+        mod_depth = np.random.uniform(0.1, 0.5) # Random intensity
+        resp_wave = 1 + mod_depth * np.sin(2 * np.pi * target_freq * t)
+        
+        # 3. INJECT
+        augmented_ppg = clean_cardiac * resp_wave
+        
+        # 4. CONVERT TO 2D SCALOGRAM
+        # Result is (64, 64) tensor
+        scalogram = generate_2d_scalogram(augmented_ppg, fs=self.fs)
+        
+        # Return Input (Image) and Label (Frequency float)
+        return scalogram.float(), torch.tensor(target_freq, dtype=torch.float32)
