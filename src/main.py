@@ -1201,7 +1201,7 @@ def create_folds(processed_data, n_splits=10, seed=42):
     np.random.seed(seed)
     random.seed(seed)
 
-    all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items())
+    all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items())
     subjects_array = np.array(sorted(all_subjects))
             
     # Shuffle subjects
@@ -1255,7 +1255,7 @@ def create_data_splits(cv_split, processed_data):
     validation_subjects = cv_split["val_subjects"]
     test_subjects = cv_split["test_subjects"]
 
-    subject_ids = [subject_id for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items()]
+    subject_ids = [subject_id for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items()]
 
     train_ppg_list = []
     train_rr_list = []
@@ -1743,7 +1743,7 @@ def main(cfg: DictConfig):
     
     count_zero = 0
     segment_counts = {}
-    for subject_id, (ppg_segments, rr_segments, freq_segments) in processed_data.items():
+    for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items():
         
         n_segments = len(rr_segments)   # or entry["PPG"].shape[0]
         segment_counts[subject_id] = n_segments
