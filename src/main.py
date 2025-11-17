@@ -31,6 +31,10 @@ import torch.distributed as dist
 from sklearn.model_selection import KFold
 import random
 
+from model import FreqSSLPretrainModule
+from dataset import FrequencySSLDataset
+
+
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
     if not os.path.exists(path):
@@ -1046,7 +1050,13 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             ppg_segments, rr_segments = create_segments_simple(subject_id, ppg_cliped, rr_labels_denoised,ppg_fs=original_rate,
                                                      rr_fs=1, window_size_sec=cfg.training.window_size, overlap_sec=cfg.training.overlap)
         
-        
+        # 3. [NEW] Create Segments for SSL (Broadband / Cardiac Preserved)
+        # We use ppg_denoised here because it still contains the Heart Rate (> 1.0 Hz)
+        ppg_segments_ssl, _ = create_segments_simple(
+            subject_id, ppg_denoised, rr_labels_denoised, 
+            ppg_fs=original_rate, rr_fs=1, 
+            window_size_sec=cfg.training.window_size, overlap_sec=cfg.training.overlap
+        )
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
         n_jobs = max(1, cpu_count() - 6)
         logger.info(f"Compute frequency segments for subject {subject_id}")
@@ -1055,7 +1065,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
 
-        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments)
+        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
         # logger.info(f"processed data is {processed_data}")
         
     return processed_data
@@ -1250,33 +1260,39 @@ def create_data_splits(cv_split, processed_data):
     train_ppg_list = []
     train_rr_list = []
     train_freq_list = []
+    train_ppg_ssl_list = []
     for train_subject in train_subjects:
         if train_subject in subject_ids:
             train_ppg_list.append(processed_data[train_subject][0])
             train_rr_list.append(processed_data[train_subject][1])
             train_freq_list.append(processed_data[train_subject][2])
+            train_ppg_ssl_list.append(processed_data[train_subject][3])
         else:
             logger.warning(f"Train subject {train_subject} not found in processed data.")
     
     val_ppg_list = []
     val_rr_list = []
     val_freq_list = []
+    val_ppg_ssl_list = []
     for val_subject in validation_subjects:
         if val_subject in subject_ids:
             val_ppg_list.append(processed_data[val_subject][0])
             val_rr_list.append(processed_data[val_subject][1])
             val_freq_list.append(processed_data[val_subject][2])
+            val_ppg_ssl_list.append(processed_data[val_subject][3])
         else:
             logger.warning(f"Validation subject {val_subject} not found in processed data.")
 
     test_ppg_list = []
     test_rr_list = []
     test_freq_list = []
+    test_ppg_ssl_list = []
     for test_subject in test_subjects:
         if test_subject in subject_ids:
             test_ppg_list.append(processed_data[test_subject][0])
             test_rr_list.append(processed_data[test_subject][1])
             test_freq_list.append(processed_data[test_subject][2])
+            test_ppg_ssl_list.append(processed_data[test_subject][3])
         else:
             logger.warning(f"Test subject {test_subject} not found in processed data.")
     train_ppg = np.concatenate(train_ppg_list, axis=0).tolist()
@@ -1288,6 +1304,11 @@ def create_data_splits(cv_split, processed_data):
     test_ppg = np.concatenate(test_ppg_list, axis=0).tolist()
     test_rr = np.concatenate(test_rr_list, axis=0).tolist()
     test_freq = np.concatenate(test_freq_list, axis=0).tolist()
+
+    # --- CHANGE 4: Concatenate SSL Data ---
+    train_ppg_ssl = np.concatenate(train_ppg_ssl_list, axis=0).tolist()
+    val_ppg_ssl = np.concatenate(val_ppg_ssl_list, axis=0).tolist()
+    test_ppg_ssl = np.concatenate(test_ppg_ssl_list, axis=0).tolist()
     # logger.info(f"train ppg shape: {train_ppg.shape}, train rr shape: {train_rr.shape}")
     # logger.info(f"val ppg shape: {val_ppg.shape}, val rr shape: {val_rr.shape}")
     # logger.info(f"test ppg shape: {test_ppg.shape}, test rr shape: {test_rr.shape}")
@@ -1301,9 +1322,11 @@ def create_data_splits(cv_split, processed_data):
         'train_ppg': train_ppg,
         'train_rr': train_rr,
         'train_freq': train_freq,
+        'train_ppg_ssl': train_ppg_ssl,
         'val_ppg': val_ppg,
         'val_rr': val_rr,
         'val_freq': val_freq,
+        'val_ppg_ssl': val_ppg_ssl,
         'test_ppg': test_ppg,
         'test_rr': test_rr,
         'test_freq': test_freq,
@@ -1510,78 +1533,155 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
             exit()
 
-        if cfg.training.ablation_mode in ["fusion", "time_only"]:
-            # Second, check the new flag to see if we should run SSL
-            if cfg.training.use_ssl_pretraining:
+        if cfg.training.use_ssl_pretraining:
+            
+            ssl_model = None
+            ssl_data_module = None
+            pretrained_path = ""
 
-                logger.info(f"[Fold {fold_id}] SSL Pre-training: ENABLED.")
-                logger.info(f"[Fold {fold_id}] Starting SSL Pre-training for mode '{cfg.training.ablation_mode}'...")
-                # 1. Setup Logger for the SSL phase
-                ssl_logger = TensorBoardLogger(
-                    save_dir=cfg.logging.log_dir,
-                    name=cfg.logging.experiment_name,
-                    version=f'fold_{cv_split["fold_id"]}_ssl' # Appending '_ssl' to differentiate logs
-                )
-
-                # 2. Setup Callbacks for the SSL phase
-                # This will save the model with the best validation loss
-                ssl_checkpoint_callback = ModelCheckpoint(
-                    monitor='val_loss',
-                    dirpath=ssl_logger.log_dir, # Save checkpoints in the same folder as logs
-                    filename='ssl-best-checkpoint',
-                    save_top_k=1,
-                    mode='min'
-                )
-
-                # This will stop training if the validation loss doesn't improve for 5 epochs
-                ssl_early_stopping_callback = EarlyStopping(
-                    monitor='val_loss',
-                    patience=5, # Number of epochs with no improvement after which training will be stopped.
-                    verbose=True,
-                    mode='min'
-                )
-                progress_bar = TQDMProgressBar(leave=True)
-                 # Create the specific datamodule for SSL
+            # --- BRANCH 1: Time Domain SSL ---
+            if cfg.training.ablation_mode in ["time_only"]:
+                logger.info(f"[Fold {fold_id}] Starting TIME SSL Pre-training...")
+                # ... Your existing time-domain SSL setup ...
                 ssl_data_module = setup_ssl_datamodule(cfg, fold_data, processed_capnobase_ssl, val_dataset)
                 ssl_model = SSLPretrainModule(cfg)
-                ssl_trainer = pl.Trainer(
-                    max_epochs=cfg.ssl.max_epochs,
-                    accelerator="auto",
-                    devices=cfg.hardware.devices,
-                    # strategy='ddp_find_unused_parameters_true',
-                    # detect_anomaly=True,
-                    logger=ssl_logger,
-                    log_every_n_steps=1,
-                    callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
+                pretrained_path = f"fold_{fold_id}_time_encoder.pth"
+
+            # --- BRANCH 2: Frequency Domain SSL (NEW) ---
+            elif cfg.training.ablation_mode in ["freq_only"]:
+                logger.info(f"[Fold {fold_id}] Starting FREQ SSL Pre-training (Synthetic Injection)...")
+                
+                # 1. Setup Dataset
+                # Note: We use 'train_ppg' which are raw segments
+                ssl_train_ds = FrequencySSLDataset(fold_data['train_ppg_ssl'], fs=125) # Adjust fs if needed
+                ssl_val_ds   = FrequencySSLDataset(fold_data['val_ppg_ssl'], fs=125)
+                
+                ssl_data_module = pl.LightningDataModule.from_datasets(
+                    ssl_train_ds, ssl_val_ds, batch_size=cfg.training.batch_size, num_workers=cfg.training.num_workers
                 )
-                # Start pre-training
-                ssl_trainer.fit(ssl_model, datamodule=ssl_data_module)
-                best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
-                pretrained_path = f"fold_{fold_id}_encoder.pth"
-                # Save only on rank 0 to avoid corruption in DDP
-                if not dist.is_initialized() or dist.get_rank() == 0:
-                    print(f"Rank {dist.get_rank()} is saving the model...")
-                    torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+                
+                # 2. Setup Model
+                ssl_model = FreqSSLPretrainModule(cfg)
+                pretrained_path = f"fold_{fold_id}_freq_encoder.pth"
 
-                # This barrier should be OUTSIDE the if statement.
-                # All processes must call it.
-                if dist.is_initialized():
-                    dist.barrier()
+            # --- Common Training Logic ---
+            ssl_logger = TensorBoardLogger(
+                save_dir=cfg.logging.log_dir,
+                name=cfg.logging.experiment_name,
+                version=f'fold_{cv_split["fold_id"]}_ssl_{cfg.training.ablation_mode}'
+            )
 
-                print(f"Rank {dist.get_rank()} has passed the barrier and will now proceed to loading.")
-                # torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
-                logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
-                # Set the path in the config for the fine-tuning stage
-                cfg.training.pretrained_path = pretrained_path
-            else:
-                # This is the new "ablation" path where we skip SSL
-                logger.info(f"[Fold {fold_id}] SSL Pre-training: DISABLED (Training from scratch).")
-                cfg.training.pretrained_path = None # Ensure no pre-trained model is loaded
+            ssl_checkpoint_callback = ModelCheckpoint(
+                monitor='val_loss',
+                dirpath=ssl_logger.log_dir,
+                filename='ssl-best-checkpoint',
+                save_top_k=1,
+                mode='min'
+            )
+            
+            ssl_trainer = pl.Trainer(
+                max_epochs=cfg.ssl.max_epochs,
+                accelerator="auto",
+                devices=cfg.hardware.devices,
+                logger=ssl_logger,
+                callbacks=[ssl_checkpoint_callback, TQDMProgressBar(leave=True)]
+            )
+
+            ssl_trainer.fit(ssl_model, datamodule=ssl_data_module)
+            
+            # Load best and save encoder weights
+            best_ssl_model_path = ssl_checkpoint_callback.best_model_path
+            
+            if cfg.training.ablation_mode == "time_only":
+                best_model = SSLPretrainModule.load_from_checkpoint(best_ssl_model_path)
+            else: 
+                best_model = FreqSSLPretrainModule.load_from_checkpoint(best_ssl_model_path)
+
+            if not dist.is_initialized() or dist.get_rank() == 0:
+                # Both modules have self.encoder, so this line works for both
+                torch.save(best_model.encoder.state_dict(), pretrained_path)
+                logger.info(f"Saved best pre-trained encoder to {pretrained_path}")
+
+            if dist.is_initialized():
+                dist.barrier()
+
+            cfg.training.pretrained_path = pretrained_path
+
+        else:
+             logger.info(f"[Fold {fold_id}] SSL Pre-training: DISABLED.")
+             cfg.training.pretrained_path = None
+        # if cfg.training.ablation_mode in ["fusion", "time_only"]:
+        #     # Second, check the new flag to see if we should run SSL
+        #     if cfg.training.use_ssl_pretraining:
+
+        #         logger.info(f"[Fold {fold_id}] SSL Pre-training: ENABLED.")
+        #         logger.info(f"[Fold {fold_id}] Starting SSL Pre-training for mode '{cfg.training.ablation_mode}'...")
+        #         # 1. Setup Logger for the SSL phase
+        #         ssl_logger = TensorBoardLogger(
+        #             save_dir=cfg.logging.log_dir,
+        #             name=cfg.logging.experiment_name,
+        #             version=f'fold_{cv_split["fold_id"]}_ssl' # Appending '_ssl' to differentiate logs
+        #         )
+
+        #         # 2. Setup Callbacks for the SSL phase
+        #         # This will save the model with the best validation loss
+        #         ssl_checkpoint_callback = ModelCheckpoint(
+        #             monitor='val_loss',
+        #             dirpath=ssl_logger.log_dir, # Save checkpoints in the same folder as logs
+        #             filename='ssl-best-checkpoint',
+        #             save_top_k=1,
+        #             mode='min'
+        #         )
+
+        #         # This will stop training if the validation loss doesn't improve for 5 epochs
+        #         ssl_early_stopping_callback = EarlyStopping(
+        #             monitor='val_loss',
+        #             patience=5, # Number of epochs with no improvement after which training will be stopped.
+        #             verbose=True,
+        #             mode='min'
+        #         )
+        #         progress_bar = TQDMProgressBar(leave=True)
+        #          # Create the specific datamodule for SSL
+        #         ssl_data_module = setup_ssl_datamodule(cfg, fold_data, processed_capnobase_ssl, val_dataset)
+        #         ssl_model = SSLPretrainModule(cfg)
+        #         ssl_trainer = pl.Trainer(
+        #             max_epochs=cfg.ssl.max_epochs,
+        #             accelerator="auto",
+        #             devices=cfg.hardware.devices,
+        #             # strategy='ddp_find_unused_parameters_true',
+        #             # detect_anomaly=True,
+        #             logger=ssl_logger,
+        #             log_every_n_steps=1,
+        #             callbacks=[ssl_checkpoint_callback, ssl_early_stopping_callback, progress_bar]
+        #         )
+        #         # Start pre-training
+        #         ssl_trainer.fit(ssl_model, datamodule=ssl_data_module)
+        #         best_ssl_model = SSLPretrainModule.load_from_checkpoint(ssl_checkpoint_callback.best_model_path)
+        #         pretrained_path = f"fold_{fold_id}_encoder.pth"
+        #         # Save only on rank 0 to avoid corruption in DDP
+        #         if not dist.is_initialized() or dist.get_rank() == 0:
+        #             print(f"Rank {dist.get_rank()} is saving the model...")
+        #             torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+
+        #         # This barrier should be OUTSIDE the if statement.
+        #         # All processes must call it.
+        #         if dist.is_initialized():
+        #             dist.barrier()
+
+        #         print(f"Rank {dist.get_rank()} has passed the barrier and will now proceed to loading.")
+        #         # torch.save(best_ssl_model.encoder.state_dict(), pretrained_path)
+        #         logger.info(f"[Fold {fold_id}]Saved best pre-trained encoder to {pretrained_path}")
+        #         # Set the path in the config for the fine-tuning stage
+        #         cfg.training.pretrained_path = pretrained_path
+        #     else:
+        #         # This is the new "ablation" path where we skip SSL
+        #         logger.info(f"[Fold {fold_id}] SSL Pre-training: DISABLED (Training from scratch).")
+        #         cfg.training.pretrained_path = None # Ensure no pre-trained model is loaded
         
-        else: # This block handles the 'freq_only' case
-            logger.info(f"[Fold {fold_id}] Skipping SSL Pre-training for mode '{cfg.training.ablation_mode}'.")
-            # Ensure the path is not set from a previous run
-            cfg.training.pretrained_path = None
+        # else: # This block handles the 'freq_only' case
+        #     logger.info(f"[Fold {fold_id}] Skipping SSL Pre-training for mode '{cfg.training.ablation_mode}'.")
+        #     # Ensure the path is not set from a previous run
+        #     cfg.training.pretrained_path = None
 
          # --- The fine-tuning stage proceeds from here ---
         logger.info(f"[Fold {fold_id}] Starting Supervised Fine-tuning...")

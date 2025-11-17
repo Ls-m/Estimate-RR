@@ -537,7 +537,54 @@ class AdvancedScalogramEncoder(nn.Module):
         # flattened = pooled.flatten(1)
         feature_vector_1d = self.mlp_head(features_2d)
         return feature_vector_1d
-    
+
+import pytorch_lightning as pl
+import torch.nn as nn
+import torch.nn.functional as F
+
+class FreqSSLPretrainModule(pl.LightningModule):
+    def __init__(self, cfg):
+        super().__init__()
+        self.save_hyperparameters()
+        self.cfg = cfg
+        
+        # Initialize the SAME encoder you use in the main model
+        self.encoder = AdvancedScalogramEncoder(
+            image_size=(64, 64), 
+            output_features=cfg.training.freq_model_output_dim
+        )
+        
+        # Temporary projection head for the regression task
+        self.regressor = nn.Sequential(
+            nn.Linear(cfg.training.freq_model_output_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1) # Predicts single frequency value
+        )
+        
+        self.loss_fn = nn.MSELoss()
+
+    def forward(self, x):
+        features = self.encoder(x)
+        freq_pred = self.regressor(features)
+        return freq_pred.squeeze(-1)
+
+    def training_step(self, batch, batch_idx):
+        scalogram, target_freq = batch
+        pred_freq = self.forward(scalogram)
+        loss = self.loss_fn(pred_freq, target_freq)
+        self.log('train_loss', loss, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        scalogram, target_freq = batch
+        pred_freq = self.forward(scalogram)
+        loss = self.loss_fn(pred_freq, target_freq)
+        self.log('val_loss', loss, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=1e-3)
+
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
@@ -642,6 +689,20 @@ class RRLightningModule(pl.LightningModule):
                 output_features=self.cfg.freq_model_output_dim # The output vector size
             )
             fusion_dim += self.cfg.freq_model_output_dim
+            # 2. Load Pretrained Weights (NEW LOGIC)
+            # Only load if we are in freq_only mode (or handle fusion logic separately)
+            if self.ablation_mode == "freq_only" and cfg.training.get("pretrained_path"):
+                pretrained_path = cfg.training.get("pretrained_path")
+                print(f"Loading pretrained FREQ encoder from: {pretrained_path}")
+                
+                map_location = {'cuda:0': f'cuda:{dist.get_rank()}'} if torch.cuda.is_available() and dist.is_initialized() else 'cpu'
+                
+                try:
+                    pretrained_dict = torch.load(pretrained_path, map_location=map_location, weights_only=True)
+                    self.freq_model.load_state_dict(pretrained_dict)
+                    print("Freq Model weights loaded successfully.")
+                except Exception as e:
+                    print(f"Failed to load freq weights: {e}")
 
         
         self.head = nn.Sequential(
