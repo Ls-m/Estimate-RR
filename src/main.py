@@ -1584,6 +1584,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
                 accelerator="auto",
                 devices=cfg.hardware.devices,
                 logger=ssl_logger,
+                log_every_n_steps=1,
                 callbacks=[ssl_checkpoint_callback, TQDMProgressBar(leave=True)]
             )
 
