@@ -1766,7 +1766,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                            #  strategy='ddp_find_unused_parameters_true',
+                             strategy='ddp_find_unused_parameters_true',
                             #  detect_anomaly=True,
                              callbacks=callbacks,
                              logger=tblogger,
