@@ -824,7 +824,7 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     return psd_band.astype(np.float32)
 
-def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
+def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 128), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
     if use_fake or ppg_segment is None:
         # Generate fake normalized data
         fake_scalogram = np.random.rand(*image_size).astype(np.float32)
@@ -849,18 +849,23 @@ def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 64), fmin=0.1, f
     # --- 3. Resize to Target Image Dimensions ---
     # Use scikit-image for high-quality resizing
     # anti_aliasing=True is recommended when downsampling
+    # Resize (Keep frequency 64, increase time to 128)
     resized_scalogram = resize(scalogram, image_size, anti_aliasing=True)
     
-    # --- 4. Normalize the Image to [0, 1] ---
-    # This is crucial for deep learning models
-    min_val = resized_scalogram.min()
-    max_val = resized_scalogram.max()
+    # --- 4. THE FIX: FIXED SCALING ---
+    # Do NOT use (x - min) / (max - min).
+    # Since input is Z-scored, real signals rarely exceed a CWT magnitude of ~5.0 or 6.0.
+    # We divide by a fixed factor to bring typical signals to ~0.0 - 1.0 range,
+    # but we allow outliers to clip.
     
-    if max_val - min_val > 1e-6: # Avoid division by zero
-        normalized_scalogram = (resized_scalogram - min_val) / (max_val - min_val)
-    else:
-        # Handle the case of a constant-value image
-        normalized_scalogram = np.zeros(image_size)
+    FIXED_MAX_VAL = 6.0  # Empirical value for Morlet CWT on Z-scored data
+    
+    normalized_scalogram = resized_scalogram / FIXED_MAX_VAL
+    
+    # Clip to ensure 0-1 range (Deep Learning loves 0-1)
+    # Real signals will be bright (near 1.0).
+    # Background noise will be dark (near 0.1).
+    normalized_scalogram = np.clip(normalized_scalogram, 0.0, 1.0)
     # plt.imshow(normalized_scalogram, cmap='viridis', aspect='auto')
     # plt.axis('off')
     # plt.show()
