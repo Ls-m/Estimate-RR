@@ -824,53 +824,114 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     return psd_band.astype(np.float32)
 
-def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 60), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
-    if use_fake or ppg_segment is None:
-        # Generate fake normalized data
-        fake_scalogram = np.random.rand(*image_size).astype(np.float32)
-        return fake_scalogram
-    # --- 1. Calculate CWT Coefficients ---
+
+import numpy as np
+import pywt
+from skimage.transform import resize
+
+def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(64, 60), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
+    """
+    Generates a CWT scalogram optimized for Seq2Seq RWKV.
+    
+    Args:
+        ppg_segment: 1D array of PPG data (60 seconds).
+        fs: Sampling rate (125 Hz).
+        target_shape: (Freq_Bins, Time_Steps). 
+                      For RWKV Seq2Seq, set (64, 60) -> 60 output steps = 1 per second.
+        fmin: Min frequency (0.1 Hz).
+        fmax: Max frequency (0.8 Hz to catch high RR).
+    """
+    if use_fake or ppg_segment is None or len(ppg_segment) < 2:
+        return np.random.rand(*target_shape).astype(np.float32)
+
+    # --- STEP 1: SAFE Z-SCORE (Time Domain) ---
+    # Normalize the input signal so amplitudes are comparable across subjects.
+    # We use a noise floor to prevent amplifying flat-lines (sensor off).
+    mu = np.mean(ppg_segment)
+    sigma = np.std(ppg_segment)
+    NOISE_FLOOR = 0.001  # Adjust if your raw data is huge (e.g. ADC counts), use 1.0
+    safe_sigma = max(sigma, NOISE_FLOOR)
+    segment_norm = (ppg_segment - mu) / safe_sigma
+
+    # --- STEP 2: CWT CONFIGURATION ---
     dt = 1.0 / fs
-    # Define the scales corresponding to the frequency range
-    # The number of scales will determine the initial height of the image
-    num_scales = image_size[0] 
+    # We compute scales based on the target FREQUENCY resolution (64 bins)
+    num_scales = target_shape[0] 
     fc = pywt.central_frequency(wavelet)
     scale_min = fc / (fmax * dt)
     scale_max = fc / (fmin * dt)
     scales = np.linspace(scale_min, scale_max, num_scales)
-    
-    # Perform the Continuous Wavelet Transform
-    cwt_coeffs, freqs = pywt.cwt(ppg_segment, scales, wavelet, sampling_period=dt)
-    
-    # --- 2. Create the Image from Magnitude ---
-    # Take the absolute value to get the magnitude (energy)
+
+    # --- STEP 3: COMPUTE CWT ---
+    # We assume the input length is ~7500 samples (60s * 125Hz).
+    # The output 'cwt_coeffs' will have shape (64, 7500).
+    cwt_coeffs, _ = pywt.cwt(segment_norm, scales, wavelet, sampling_period=dt)
     scalogram = np.abs(cwt_coeffs)
 
-    # --- 3. Resize to Target Image Dimensions ---
-    # Use scikit-image for high-quality resizing
-    # anti_aliasing=True is recommended when downsampling
-    # Resize (Keep frequency 64, increase time to 128)
-    resized_scalogram = resize(scalogram, image_size, anti_aliasing=True)
-    
-    # --- 4. THE FIX: FIXED SCALING ---
-    # Do NOT use (x - min) / (max - min).
-    # Since input is Z-scored, real signals rarely exceed a CWT magnitude of ~5.0 or 6.0.
-    # We divide by a fixed factor to bring typical signals to ~0.0 - 1.0 range,
-    # but we allow outliers to clip.
-    
-    FIXED_MAX_VAL = 6.0  # Empirical value for Morlet CWT on Z-scored data
-    
+    # --- STEP 4: RESIZE TO TARGET SHAPE ---
+    # We resize (64, 7500) -> (64, 60).
+    # This effectively averages the energy within each 1-second block.
+    # preserve_range=True is crucial to keep the intensity physics-based.
+    resized_scalogram = resize(scalogram, target_shape, anti_aliasing=True, preserve_range=True)
+
+    # --- STEP 5: FIXED SCALING (Image Domain) ---
+    # Since input is Z-scored, a perfect wave maxes out at ~6.0 in CWT magnitude.
+    # We divide by 6.0 to map "strong signal" to ~1.0.
+    FIXED_MAX_VAL = 6.0
     normalized_scalogram = resized_scalogram / FIXED_MAX_VAL
-    
-    # Clip to ensure 0-1 range (Deep Learning loves 0-1)
-    # Real signals will be bright (near 1.0).
-    # Background noise will be dark (near 0.1).
+
+    # Clip to [0, 1]. 
+    # Result: Strong breaths are Bright. Noise is Dark.
     normalized_scalogram = np.clip(normalized_scalogram, 0.0, 1.0)
-    # plt.imshow(normalized_scalogram, cmap='viridis', aspect='auto')
-    # plt.axis('off')
-    # plt.show()
-    # exit()
+
     return normalized_scalogram.astype(np.float32)
+# def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 60), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
+#     if use_fake or ppg_segment is None:
+#         # Generate fake normalized data
+#         fake_scalogram = np.random.rand(*image_size).astype(np.float32)
+#         return fake_scalogram
+#     # --- 1. Calculate CWT Coefficients ---
+#     dt = 1.0 / fs
+#     # Define the scales corresponding to the frequency range
+#     # The number of scales will determine the initial height of the image
+#     num_scales = image_size[0] 
+#     fc = pywt.central_frequency(wavelet)
+#     scale_min = fc / (fmax * dt)
+#     scale_max = fc / (fmin * dt)
+#     scales = np.linspace(scale_min, scale_max, num_scales)
+    
+#     # Perform the Continuous Wavelet Transform
+#     cwt_coeffs, freqs = pywt.cwt(ppg_segment, scales, wavelet, sampling_period=dt)
+    
+#     # --- 2. Create the Image from Magnitude ---
+#     # Take the absolute value to get the magnitude (energy)
+#     scalogram = np.abs(cwt_coeffs)
+
+#     # --- 3. Resize to Target Image Dimensions ---
+#     # Use scikit-image for high-quality resizing
+#     # anti_aliasing=True is recommended when downsampling
+#     # Resize (Keep frequency 64, increase time to 128)
+#     resized_scalogram = resize(scalogram, image_size, anti_aliasing=True)
+    
+#     # --- 4. THE FIX: FIXED SCALING ---
+#     # Do NOT use (x - min) / (max - min).
+#     # Since input is Z-scored, real signals rarely exceed a CWT magnitude of ~5.0 or 6.0.
+#     # We divide by a fixed factor to bring typical signals to ~0.0 - 1.0 range,
+#     # but we allow outliers to clip.
+    
+#     FIXED_MAX_VAL = 6.0  # Empirical value for Morlet CWT on Z-scored data
+    
+#     normalized_scalogram = resized_scalogram / FIXED_MAX_VAL
+    
+#     # Clip to ensure 0-1 range (Deep Learning loves 0-1)
+#     # Real signals will be bright (near 1.0).
+#     # Background noise will be dark (near 0.1).
+#     normalized_scalogram = np.clip(normalized_scalogram, 0.0, 1.0)
+#     # plt.imshow(normalized_scalogram, cmap='viridis', aspect='auto')
+#     # plt.axis('off')
+#     # plt.show()
+#     # exit()
+#     return normalized_scalogram.astype(np.float32)
 
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
