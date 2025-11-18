@@ -848,6 +848,8 @@ class RRLightningModule(pl.LightningModule):
             self.criterion = nn.MSELoss()
         elif cfg.training.criterion == "L1Loss":
             self.criterion = nn.L1Loss()
+        elif cfg.training.criterion == "Huber":
+            self.criterion = nn.HuberLoss(delta=1.0)
         else:
             raise ValueError(f"Unsupported criterion: {cfg.training.criterion}")
         
