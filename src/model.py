@@ -14,6 +14,9 @@ import torch.distributed as dist
 from typing import Tuple, Optional
 import torchmetrics
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 def ppg_augmentation(x, crop_ratio=0.8):
     """
@@ -538,6 +541,125 @@ class AdvancedScalogramEncoder(nn.Module):
         feature_vector_1d = self.mlp_head(features_2d)
         return feature_vector_1d
 
+class SEBlock(nn.Module):
+    """
+    Squeeze-and-Excitation Block.
+    Helps the model focus on relevant 'channels' (features) by recalibrating them.
+    Essential for distinguishing faint respiratory signals from noise.
+    """
+    def __init__(self, channel, reduction=16):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channel, channel // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channel // reduction, channel, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+class ResidualBlock(nn.Module):
+    """
+    A ResNet-style block with SE attention.
+    """
+    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        
+        self.se = SEBlock(out_channels) # <--- The "Attention" magic
+        self.downsample = downsample
+
+    def forward(self, x):
+        residual = x
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        
+        # Apply Attention
+        out = self.se(out)
+
+        out += residual
+        out = self.relu(out)
+        return out
+
+class RobustScalogramEncoder(nn.Module):
+    def __init__(self, in_channels=1, output_features=64, dropout_rate=0.3):
+        super().__init__()
+        
+        # Initial Stage: Expand features immediately
+        self.inplanes = 32
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+        # ResNet Layers (Deeper and wider than your previous model)
+        self.layer1 = self._make_layer(32, blocks=2, stride=1)
+        self.layer2 = self._make_layer(64, blocks=2, stride=2)
+        self.layer3 = self._make_layer(128, blocks=2, stride=2)
+        
+        # Global Pooling (Replaces Flatten) - Makes input size flexible
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        
+        self.fc_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, output_features)
+        )
+
+    def _make_layer(self, planes, blocks, stride=1):
+        downsample = None
+        if stride != 1 or self.inplanes != planes:
+            downsample = nn.Sequential(
+                nn.Conv2d(self.inplanes, planes, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(planes),
+            )
+
+        layers = []
+        layers.append(ResidualBlock(self.inplanes, planes, stride, downsample))
+        self.inplanes = planes
+        for _ in range(1, blocks):
+            layers.append(ResidualBlock(self.inplanes, planes))
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        # Handle missing channel dim
+        if x.dim() == 3:
+            x = x.unsqueeze(1)
+
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+
+        x = self.avgpool(x)
+        x = self.fc_head(x)
+
+        return x
+
 import pytorch_lightning as pl
 import torch.nn as nn
 import torch.nn.functional as F
@@ -596,7 +718,7 @@ class RRLightningModule(pl.LightningModule):
         self.train_metrics = torchmetrics.MetricCollection(metrics, prefix="train/")
         self.val_metrics = torchmetrics.MetricCollection(metrics, prefix="val/")
         self.test_metrics = torchmetrics.MetricCollection(metrics, prefix="test/")
-
+        self.validation_step_outputs = []
         self.cfg = cfg.training
         self.learning_rate = cfg.training.learning_rate
         self.weight_decay = cfg.training.weight_decay
@@ -684,10 +806,15 @@ class RRLightningModule(pl.LightningModule):
             #     fmax=0.6
             # )
             # self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
-            self.freq_model = AdvancedScalogramEncoder(
-                image_size=(64, 64), # Make sure this matches your generated images
-                output_features=self.cfg.freq_model_output_dim # The output vector size
+            self.freq_model = RobustScalogramEncoder(
+                in_channels=1,
+                output_features=self.cfg.freq_model_output_dim,
+                dropout_rate=cfg.training.dropout
             )
+            # self.freq_model = AdvancedScalogramEncoder(
+            #     image_size=(64, 64), # Make sure this matches your generated images
+            #     output_features=self.cfg.freq_model_output_dim # The output vector size
+            # )
             fusion_dim += self.cfg.freq_model_output_dim
             # 2. Load Pretrained Weights (NEW LOGIC)
             # Only load if we are in freq_only mode (or handle fusion logic separately)
@@ -793,9 +920,83 @@ class RRLightningModule(pl.LightningModule):
         metrics = self.val_metrics(rr_pred, rr)
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
         # --- End Fix 5 ---
-
+        # STORE DATA FOR ANALYSIS (Return it to be collected at epoch end)
+        output_data = {
+        "val_loss": loss.detach().cpu(), # Detach to save memory
+        "pred": rr_pred.detach().cpu(),
+        "target": rr.detach().cpu()
+        }
+        
+        # Append to the list explicitly
+        self.validation_step_outputs.append(output_data)
+        
         return loss
-    
+        # return loss
+    def on_validation_epoch_end(self):
+        # 1. Collect all outputs
+        outputs = self.trainer.callback_metrics # Access stored metrics if needed
+        # Note: PL 2.0+ handles outputs differently. 
+        # The easiest way is to use a dedicated list in __init__ to store step outputs
+        # OR use self.validation_step_outputs if you manually manage it (recommended).
+        
+        preds = torch.cat([x['pred'] for x in self.validation_step_outputs])
+        targets = torch.cat([x['target'] for x in self.validation_step_outputs])
+        
+        # Convert to numpy
+        preds_np = preds.numpy().flatten()   
+        targets_np = targets.numpy().flatten()
+        errors = preds_np - targets_np
+        abs_errors = np.abs(errors)
+
+        # --- ANALYSIS 1: Regression Plot ---
+        fig1, ax1 = plt.subplots(figsize=(6, 6))
+        ax1.scatter(targets_np, preds_np, alpha=0.3)
+        ax1.plot([targets_np.min(), targets_np.max()], [targets_np.min(), targets_np.max()], 'r--')
+        ax1.set_xlabel("True RR")
+        ax1.set_ylabel("Predicted RR")
+        ax1.set_title(f"Epoch {self.current_epoch}: Regression Plot")
+        
+        # --- ANALYSIS 2: Bland-Altman Plot ---
+        fig2, ax2 = plt.subplots(figsize=(8, 4))
+        means = (targets_np + preds_np) / 2
+        diffs = preds_np - targets_np
+        mean_diff = np.mean(diffs)
+        std_diff = np.std(diffs)
+        
+        ax2.scatter(means, diffs, alpha=0.3)
+        ax2.axhline(mean_diff, color='red', linestyle='--', label=f'Mean Bias: {mean_diff:.2f}')
+        ax2.axhline(mean_diff + 1.96*std_diff, color='gray', linestyle='--') # +95% limits
+        ax2.axhline(mean_diff - 1.96*std_diff, color='gray', linestyle='--') # -95% limits
+        ax2.set_xlabel("Mean of (Pred + True)")
+        ax2.set_ylabel("Difference (Pred - True)")
+        ax2.set_title("Bland-Altman Plot")
+        ax2.legend()
+
+        # --- ANALYSIS 3: Error by Rate Bin ---
+        # Create dataframe for easy binning
+        df = pd.DataFrame({'target': targets_np, 'abs_error': abs_errors})
+        # Define bins: <10, 10-15, 15-20, 20-25, >25
+        bins = [0, 10, 15, 20, 25, 100]
+        labels = ['<10', '10-15', '15-20', '20-25', '>25']
+        df['binned'] = pd.cut(df['target'], bins=bins, labels=labels)
+        
+        fig3, ax3 = plt.subplots(figsize=(8, 4))
+        sns.barplot(data=df, x='binned', y='abs_error', ax=ax3)
+        ax3.set_title("MAE by Respiratory Rate Zone")
+        
+        # --- LOGGING ---
+        # Assuming you use TensorBoardLogger
+        tensorboard = self.logger.experiment
+        tensorboard.add_figure("Analysis/Regression", fig1, self.current_epoch)
+        tensorboard.add_figure("Analysis/BlandAltman", fig2, self.current_epoch)
+        tensorboard.add_figure("Analysis/ErrorByBin", fig3, self.current_epoch)
+        
+        plt.close(fig1)
+        plt.close(fig2)
+        plt.close(fig3)
+        
+        # Clear the list for next epoch
+        self.validation_step_outputs.clear()
     # def on_validation_epoch_end(self):
     #     if not self.validation_step_outputs:
     #         return
