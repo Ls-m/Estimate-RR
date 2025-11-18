@@ -1100,6 +1100,15 @@ class RRLightningModule(pl.LightningModule):
                     'frequency': 1,
                 }
             }
+        elif self.scheduler == "OneCycleLR":
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=1e-3,          # Higher peak LR to escape local minima
+            total_steps=self.trainer.estimated_stepping_batches,
+            pct_start=0.3,        # Warmup for 30% of training
+            div_factor=25,
+            final_div_factor=1e4
+        )
         else:       
             return optimizer
         
