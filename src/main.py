@@ -824,7 +824,7 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     return psd_band.astype(np.float32)
 
-def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 128), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
+def generate_cwt_scalogram(ppg_segment, fs=125, image_size=(64, 60), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
     if use_fake or ppg_segment is None:
         # Generate fake normalized data
         fake_scalogram = np.random.rand(*image_size).astype(np.float32)
