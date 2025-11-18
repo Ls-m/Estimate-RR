@@ -218,53 +218,74 @@ class RWKV(nn.Module):
         # return x  # (batch_size, hidden_size)
 
 class RWKVScalogramModel(nn.Module):
-    def __init__(self, freq_bins=128, hidden_size=256, num_layers=2, dropout=0.1):
+    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1):
         super().__init__()
         
-        # --- NEW: CNN Feature Extractor ---
-        # Instead of a Linear layer, we use Conv1d to extract spectral features.
-        # This treats the Frequency Bins like a signal.
-        # Input channels = 1 (Scalogram intensity), Output = hidden_size
+        # --- 1. The "Eye" (Feature Extractor) ---
+        # Input: (Batch, 1, Freq=128, Time=60)
+        # We use kernels like (kernel_freq, 1) to process Frequency ONLY, preserving Time.
+        
         self.feature_extractor = nn.Sequential(
-            nn.Conv1d(1, 32, kernel_size=5, stride=2, padding=2), # Downsamples freq by 2
-            nn.BatchNorm1d(32),
+            # Block 1: Compress Freq 128 -> 64
+            nn.Conv2d(1, 32, kernel_size=(5, 1), stride=(2, 1), padding=(2, 0)),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv1d(32, hidden_size, kernel_size=3, stride=2, padding=1), # Downsamples freq by 2 again
-            nn.BatchNorm1d(hidden_size),
+            
+            # Block 2: Compress Freq 64 -> 32
+            nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
         )
         
-        # Calculate the size after CNN downsampling (Freq 128 -> 64 -> 32)
-        # If input freq_bins=128, the flattened feature size is 32 * hidden_size? 
-        # No, we want to map this back to 'hidden_size' for RWKV.
-        
-        # SIMPLER APPROACH: 
-        # Let's just use a robust Linear mapping but with higher freq_bins.
-        # The CNN might be too complex to debug right now.
-        # Let's stick to the Linear projection but INCREASE input resolution.
-        
+        # After 2 strides of 2, Freq 128 becomes 32.
+        # Channels are 64.
+        # Total feature dimension = 32 * 64 = 2048.
+        # We project this down to RWKV hidden size.
+        self.bridge = nn.Linear(32 * 64, hidden_size)
+
+        # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
-            input_size=freq_bins, 
+            input_size=hidden_size, 
             hidden_size=hidden_size, 
             num_layers=num_layers, 
             dropout=dropout
         )
         
+        # --- 3. The Head ---
         self.head = nn.Sequential(
             nn.Linear(hidden_size, 128),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(128, 1) 
+            nn.Linear(128, 1)
         )
 
     def forward(self, x):
-        # x shape: (Batch, Freq=128, Time=60)
-        if x.dim() == 4: x = x.squeeze(1)
+        # Input x: (Batch, Freq=128, Time=60)
         
-        # Permute for RWKV: (Batch, Time, Freq)
-        x = x.permute(0, 2, 1)  
+        # 1. Add Channel Dimension for CNN -> (B, 1, 128, 60)
+        if x.dim() == 3:
+            x = x.unsqueeze(1)
+            
+        # 2. Extract Spectral Features
+        # Output: (B, 64, 32, 60) -> (Batch, Channels, New_Freq, Time)
+        features = self.feature_extractor(x)
         
-        seq_features = self.rwkv(x) 
+        # 3. Prepare for RWKV
+        # We need (Batch, Time, Features)
+        # Permute to (B, Time, Channels, New_Freq) -> (B, 60, 64, 32)
+        features = features.permute(0, 3, 1, 2)
+        
+        # Flatten the feature vector for each time step
+        B, T, C, F = features.shape
+        features = features.reshape(B, T, C * F) # (B, 60, 2048)
+        
+        # Project to hidden size
+        features = self.bridge(features) # (B, 60, Hidden)
+        
+        # 4. Run RWKV
+        seq_features = self.rwkv(features) 
+        
+        # 5. Apply Head
         out = self.head(seq_features)
+        
         return out.squeeze(-1)
-    
