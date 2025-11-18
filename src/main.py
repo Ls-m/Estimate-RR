@@ -829,7 +829,7 @@ import numpy as np
 import pywt
 from skimage.transform import resize
 
-def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(64, 60), fmin=0.1, fmax=0.6, wavelet='morl', use_fake=False):
+def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
     """
     Generates a CWT scalogram optimized for Seq2Seq RWKV.
     
