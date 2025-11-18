@@ -812,7 +812,7 @@ class RRLightningModule(pl.LightningModule):
             #     dropout_rate=cfg.training.dropout
             # )
             self.freq_model = RWKVScalogramModel(
-                freq_bins=64,        # Must match image_size[0] in generate_cwt_scalogram
+                freq_bins=128,        # Must match image_size[0] in generate_cwt_scalogram
                 hidden_size=256,     # Internal vector size (try 128 or 256)
                 num_layers=2,        # Depth of the model
                 dropout=cfg.training.dropout
@@ -1092,7 +1092,7 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "CosineAnnealingLR":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-7)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=70, eta_min=1e-6)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
