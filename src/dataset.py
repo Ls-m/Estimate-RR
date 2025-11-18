@@ -6,49 +6,94 @@ from pytorch_lightning import LightningDataModule
 
 logger = logging.getLogger("Dataset")
 
+import torchaudio.transforms as T
 
-class PPGRRDataset(Dataset):
-    def __init__(self, cfg, ppg_data, rr_data, freq_data, augment=False):
-        self.ppg_data = ppg_data
-        self.rr_data = rr_data
-        self.freq_data = freq_data
+class PPGRRDataset(torch.utils.data.Dataset):
+    def __init__(self, cfg, ppg_data, rr_labels, freq_data, augment=False):
+        # ... existing init ...
         self.augment = augment
+        self.ppg_data = ppg_data
+        self.rr_data = rr_labels
+        self.freq_data = freq_data
         self.cfg = cfg
 
         if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
             logger.info(f"nan or inf in ppg_data")
         
-        if np.any(np.isnan(rr_data)) or np.any(np.isinf(rr_data)):
+        if np.any(np.isnan(rr_labels)) or np.any(np.isinf(rr_labels)):
             logger.info(f"nan or inf in rr_data")
 
-
-    def __len__(self):
-        return len(self.ppg_data)
+        # Define augmentations
+        # Mask up to 20 frequency bins (out of 128)
+        self.freq_masking = T.FrequencyMasking(freq_mask_param=20)
+        # Mask up to 10 time steps (out of 60)
+        self.time_masking = T.TimeMasking(time_mask_param=10)
 
     def __getitem__(self, idx):
+        # ... load data ...
+        # Let's assume 'scalogram' is your (128, 60) numpy array
         ppg_segment = self.ppg_data[idx]
         rr = self.rr_data[idx]
         freq = self.freq_data[idx]
-
-        if self.augment:
-            ppg_segment = np.array(ppg_segment, dtype=np.float32)
-            if torch.rand(1) < 0.5:
-                noise_std = self.cfg.training.noise_std * np.std(ppg_segment)
-                if noise_std > 1e-4: # Avoid adding noise to a flat-line signal
-                    noise = np.random.normal(loc=0, scale=noise_std, size=ppg_segment.shape)
-                    ppg_segment += noise
-                
-            
-            if torch.rand(1) < 0.5:
-                scale_factor = np.random.uniform(0.8, 1.2)  
-                ppg_segment = ppg_segment * scale_factor
-
-            ppg_segment = ppg_segment.tolist()
+        scalogram_tensor = torch.tensor(freq) # (128, 60)
         
+        if self.augment:
+            # SpecAugment expects (Channel, Freq, Time)
+            scalogram_tensor = scalogram_tensor.unsqueeze(0)
+            
+            # Apply masking
+            scalogram_tensor = self.freq_masking(scalogram_tensor)
+            scalogram_tensor = self.time_masking(scalogram_tensor)
+            
+            # Remove channel dim
+            scalogram_tensor = scalogram_tensor.squeeze(0)
+
         ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32)
         rr_tensor = torch.tensor(rr, dtype=torch.float32)
-        freq_tensor = torch.tensor(freq, dtype=torch.float32)
-        return ppg_tensor, rr_tensor, freq_tensor
+        return ppg_tensor, rr_tensor, scalogram_tensor
+
+# class PPGRRDataset(Dataset):
+#     def __init__(self, cfg, ppg_data, rr_data, freq_data, augment=False):
+#         self.ppg_data = ppg_data
+#         self.rr_data = rr_data
+#         self.freq_data = freq_data
+#         self.augment = augment
+#         self.cfg = cfg
+
+#         if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
+#             logger.info(f"nan or inf in ppg_data")
+        
+#         if np.any(np.isnan(rr_data)) or np.any(np.isinf(rr_data)):
+#             logger.info(f"nan or inf in rr_data")
+
+
+#     def __len__(self):
+#         return len(self.ppg_data)
+
+#     def __getitem__(self, idx):
+#         ppg_segment = self.ppg_data[idx]
+#         rr = self.rr_data[idx]
+#         freq = self.freq_data[idx]
+
+#         if self.augment:
+#             ppg_segment = np.array(ppg_segment, dtype=np.float32)
+#             if torch.rand(1) < 0.5:
+#                 noise_std = self.cfg.training.noise_std * np.std(ppg_segment)
+#                 if noise_std > 1e-4: # Avoid adding noise to a flat-line signal
+#                     noise = np.random.normal(loc=0, scale=noise_std, size=ppg_segment.shape)
+#                     ppg_segment += noise
+                
+            
+#             if torch.rand(1) < 0.5:
+#                 scale_factor = np.random.uniform(0.8, 1.2)  
+#                 ppg_segment = ppg_segment * scale_factor
+
+#             ppg_segment = ppg_segment.tolist()
+        
+#         ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32)
+#         rr_tensor = torch.tensor(rr, dtype=torch.float32)
+#         freq_tensor = torch.tensor(freq, dtype=torch.float32)
+#         return ppg_tensor, rr_tensor, freq_tensor
 
 
 class PPGRRDataModule(LightningDataModule):
