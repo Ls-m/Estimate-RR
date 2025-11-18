@@ -218,11 +218,31 @@ class RWKV(nn.Module):
         # return x  # (batch_size, hidden_size)
 
 class RWKVScalogramModel(nn.Module):
-    def __init__(self, freq_bins=64, hidden_size=256, num_layers=2, dropout=0.1):
+    def __init__(self, freq_bins=128, hidden_size=256, num_layers=2, dropout=0.1):
         super().__init__()
         
-        # 1. RWKV Core
-        # Input size must match the height of your scalogram (freq_bins)
+        # --- NEW: CNN Feature Extractor ---
+        # Instead of a Linear layer, we use Conv1d to extract spectral features.
+        # This treats the Frequency Bins like a signal.
+        # Input channels = 1 (Scalogram intensity), Output = hidden_size
+        self.feature_extractor = nn.Sequential(
+            nn.Conv1d(1, 32, kernel_size=5, stride=2, padding=2), # Downsamples freq by 2
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Conv1d(32, hidden_size, kernel_size=3, stride=2, padding=1), # Downsamples freq by 2 again
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(),
+        )
+        
+        # Calculate the size after CNN downsampling (Freq 128 -> 64 -> 32)
+        # If input freq_bins=128, the flattened feature size is 32 * hidden_size? 
+        # No, we want to map this back to 'hidden_size' for RWKV.
+        
+        # SIMPLER APPROACH: 
+        # Let's just use a robust Linear mapping but with higher freq_bins.
+        # The CNN might be too complex to debug right now.
+        # Let's stick to the Linear projection but INCREASE input resolution.
+        
         self.rwkv = RWKV(
             input_size=freq_bins, 
             hidden_size=hidden_size, 
@@ -230,10 +250,6 @@ class RWKVScalogramModel(nn.Module):
             dropout=dropout
         )
         
-        # 2. The Head
-        # IMPORTANT: We set output_size=1, NOT 60.
-        # Because this head slides across the 60 time steps.
-        # It maps (Hidden_Size) -> (1 scalar) for every second.
         self.head = nn.Sequential(
             nn.Linear(hidden_size, 128),
             nn.ReLU(),
@@ -242,26 +258,13 @@ class RWKVScalogramModel(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Input x shape: (Batch, Freq=64, Time=60)
-        """
-        # 1. Handle Dimensions
-        if x.dim() == 4: x = x.squeeze(1) # Remove channel dim if present
+        # x shape: (Batch, Freq=128, Time=60)
+        if x.dim() == 4: x = x.squeeze(1)
         
-        # 2. Permute for RWKV
-        # Turn Image (B, Freq, Time) into Sequence (B, Time, Freq)
+        # Permute for RWKV: (Batch, Time, Freq)
         x = x.permute(0, 2, 1)  
         
-        # 3. Run RWKV
-        # Output shape: (Batch, 60, Hidden_Size)
         seq_features = self.rwkv(x) 
-        
-        # 4. Apply Head
-        # The Linear layer broadcasts over the time dimension.
-        # (Batch, 60, Hidden) -> Head -> (Batch, 60, 1)
         out = self.head(seq_features)
-        
-        # 5. Final Squeeze
-        # (Batch, 60, 1) -> (Batch, 60)
         return out.squeeze(-1)
     
