@@ -17,7 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-
+from rwkv_freq import RWKVScalogramModel
 def ppg_augmentation(x, crop_ratio=0.8):
     """
     Applies a simple random temporal crop augmentation to a batch of PPG signals.
@@ -806,10 +806,16 @@ class RRLightningModule(pl.LightningModule):
             #     fmax=0.6
             # )
             # self.freq_model = FreqEncoder(n_bins=self.freq_bins, hidden=self.cfg.freq_model_output_dim)
-            self.freq_model = RobustScalogramEncoder(
-                in_channels=1,
-                output_features=self.cfg.freq_model_output_dim,
-                dropout_rate=cfg.training.dropout
+            # self.freq_model = RobustScalogramEncoder(
+            #     in_channels=1,
+            #     output_features=self.cfg.freq_model_output_dim,
+            #     dropout_rate=cfg.training.dropout
+            # )
+            self.freq_model = RWKVScalogramModel(
+                freq_bins=64,        # Must match image_size[0] in generate_cwt_scalogram
+                hidden_size=256,     # Internal vector size (try 128 or 256)
+                num_layers=2,        # Depth of the model
+                dropout=cfg.training.dropout
             )
             # self.freq_model = AdvancedScalogramEncoder(
             #     image_size=(64, 64), # Make sure this matches your generated images
@@ -859,9 +865,9 @@ class RRLightningModule(pl.LightningModule):
 
         z = torch.cat(features, dim=1)  # (B, fusion_dim)
         
-        out = self.head(z)  # (B,)
-        return out
-        # return z
+        # out = self.head(z)  # (B,)
+        # return out
+        return z
  
     
     def training_step(self, batch, batch_idx):
