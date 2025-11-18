@@ -29,6 +29,9 @@ class PPGRRDataset(torch.utils.data.Dataset):
         # Mask up to 10 time steps (out of 60)
         self.time_masking = T.TimeMasking(time_mask_param=10)
 
+    def __len__(self):
+        return len(self.ppg_data)
+    
     def __getitem__(self, idx):
         # ... load data ...
         # Let's assume 'scalogram' is your (128, 60) numpy array
