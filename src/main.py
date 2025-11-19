@@ -859,24 +859,32 @@ def augment_ppg_segment(ppg):
 
     return ppg_aug
 
-
+def _synthesize_single_sample(src_ppg, src_rr):
+    """Helper to generate 1 augmented sample (runs in parallel)."""
+    # A. Augment PPG (Noise/Drift)
+    aug_ppg = augment_ppg_segment(src_ppg)
+    
+    # B. Copy Label
+    aug_rr = copy.deepcopy(src_rr)
+    
+    # C. Generate CWT (The slow part)
+    # Ensure fmax matches your new config (0.8) and shape matches model (128, 60)
+    aug_freq = generate_cwt_scalogram(
+        aug_ppg, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8
+    )
+    
+    return aug_ppg, aug_rr, aug_freq
 def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
-    """
-    1. Finds the majority class count.
-    2. Generates synthetic data for all other classes until they match the majority count.
-    """
-    print("--- Starting Dataset Balancing (Oversampling via Synthesis) ---")
+    print("--- Starting Dataset Balancing (Parallelized) ---")
     
+    # Ensure inputs are lists
+    if isinstance(ppg_list, np.ndarray): ppg_list = list(ppg_list)
+    if isinstance(rr_list, np.ndarray): rr_list = list(rr_list)
+    if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
+
     # 1. Organize Indices by Class
-    class_indices = {
-        0: [], # < 10
-        1: [], # 10-15
-        2: [], # 15-20
-        3: [], # 20-25
-        4: []  # > 25
-    }
+    class_indices = {0: [], 1: [], 2: [], 3: [], 4: []}
     
-    # Scan the dataset
     for i, rr in enumerate(rr_list):
         mean_rr = np.mean(rr)
         if mean_rr < 10: bin_idx = 0
@@ -886,56 +894,47 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
         else: bin_idx = 4
         class_indices[bin_idx].append(i)
 
-    # 2. Find the Target Count (Majority Class)
+    # 2. Find Majority Count
     counts = [len(idxs) for idxs in class_indices.values()]
     target_count = max(counts)
     print(f"Initial Counts: {counts}")
     print(f"Target per class: {target_count}")
     
-    # Lists for the NEW synthetic data
     new_ppg, new_rr, new_freq = [], [], []
     
-    # 3. Generate Data for Minority Classes
+    # 3. Generate Data
     for bin_idx, indices in class_indices.items():
         current_count = len(indices)
-        
-        # --- FIX START: CHECK FOR EMPTY CLASS ---
         if current_count == 0:
-            print(f"Warning: Class {bin_idx} is EMPTY in this fold. Skipping augmentation.")
             continue
-        # --- FIX END ---
 
         needed = target_count - current_count
-        
         if needed <= 0:
             continue
             
-        print(f"Class {bin_idx}: Generating {needed} new samples from {current_count} sources...")
-        
-        # Generate 'needed' samples
+        print(f"Class {bin_idx}: Generating {needed} samples using {current_count} sources...")
+
+        # Prepare the list of source data to augment
+        # We pre-select the source PPGs and RRs to avoid passing the huge main list to workers
+        tasks = []
         for k in range(needed):
-            # Pick a random source sample to base the augmentation on
-            source_idx = indices[k % current_count] 
-            
-            src_ppg = ppg_list[source_idx]
-            src_rr = rr_list[source_idx]
-            
-            # A. Create augmented PPG
-            aug_ppg_seg = augment_ppg_segment(src_ppg)
-            
-            # B. Copy Label
-            aug_rr_seg = copy.deepcopy(src_rr)
-            
-            # C. Generate NEW Scalogram
-            aug_freq_seg = generate_cwt_scalogram(
-                aug_ppg_seg, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8
-            )
-            
-            new_ppg.append(aug_ppg_seg)
-            new_rr.append(aug_rr_seg)
-            new_freq.append(aug_freq_seg)
-            
-    # 4. Combine everything
+            source_idx = indices[k % current_count]
+            tasks.append((ppg_list[source_idx], rr_list[source_idx]))
+
+        # --- PARALLEL EXECUTION ---
+        # n_jobs=-1 uses all available CPU cores
+        njobs = max(1, cpu_count() - 6)
+        results = Parallel(n_jobs=njobs)(
+            delayed(_synthesize_single_sample)(p, r) for p, r in tqdm(tasks, desc=f"Class {bin_idx}")
+        )
+        
+        # Unpack results
+        for p, r, f in results:
+            new_ppg.append(p)
+            new_rr.append(r)
+            new_freq.append(f)
+
+    # 4. Combine
     final_ppg = ppg_list + new_ppg
     final_rr = rr_list + new_rr
     final_freq = freq_list + new_freq
@@ -1482,23 +1481,23 @@ def create_data_splits(cv_split, processed_data):
             logger.warning(f"Test subject {test_subject} not found in processed data.")
 
     
-    train_ppg_flat = np.concatenate(train_ppg_list, axis=0).tolist()
-    train_rr_flat = np.concatenate(train_rr_list, axis=0).tolist()
-    train_freq_flat = np.concatenate(train_freq_list, axis=0).tolist()
+    train_ppg = np.concatenate(train_ppg_list, axis=0).tolist()
+    train_rr = np.concatenate(train_rr_list, axis=0).tolist()
+    train_freq = np.concatenate(train_freq_list, axis=0).tolist()
     
     # --- DEBUG CHECK ---
     # If this prints a shape like (141, 7500), we have a problem. 
     # It should print a length (e.g., 7500).
-    first_sample = np.array(train_ppg_flat[0])
-    logger.info(f"DEBUG: First training sample shape: {first_sample.shape}")
-    if first_sample.ndim > 1:
-        raise ValueError(f"Data not flattened! Expected 1D segment, got shape {first_sample.shape}")
+    # first_sample = np.array(train_ppg_flat[0])
+    # logger.info(f"DEBUG: First training sample shape: {first_sample.shape}")
+    # if first_sample.ndim > 1:
+    #     raise ValueError(f"Data not flattened! Expected 1D segment, got shape {first_sample.shape}")
 
     # --- STEP 2: BALANCE DATASET ---
     # Now we pass the flattened lists.
-    train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
-        train_ppg_flat, train_rr_flat, train_freq_flat
-    )
+    # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
+    #     train_ppg_flat, train_rr_flat, train_freq_flat
+    # )
     val_ppg = np.concatenate(val_ppg_list, axis=0).tolist()
     val_rr = np.concatenate(val_rr_list, axis=0).tolist()
     val_freq = np.concatenate(val_freq_list, axis=0).tolist()
@@ -1514,15 +1513,15 @@ def create_data_splits(cv_split, processed_data):
     # logger.info(f"val ppg shape: {val_ppg.shape}, val rr shape: {val_rr.shape}")
     # logger.info(f"test ppg shape: {test_ppg.shape}, test rr shape: {test_rr.shape}")
     id = cv_split["fold_id"]
-    logger.info(f"total number of segments in this fold {id} is {len(train_ppg_bal)+len(val_ppg)+len(test_ppg)}")
-    logger.info(f"number of train segments is {len(train_ppg_bal)}, number of val segments is{len(val_ppg)}, number of test segments is{len(test_ppg)}")
+    logger.info(f"total number of segments in this fold {id} is {len(train_ppg)+len(val_ppg)+len(test_ppg)}")
+    logger.info(f"number of train segments is {len(train_ppg)}, number of val segments is{len(val_ppg)}, number of test segments is{len(test_ppg)}")
 
     logger.info(f"total number of subjects in this fold {id} is {len(train_subjects)+len(validation_subjects)+len(test_subjects)}")
     logger.info(f"number of train subjects is {len(train_subjects)}, number of val subjects is{len(validation_subjects)}, number of test subjects is{len(test_subjects)}")
     return {
-        'train_ppg': train_ppg_bal,
-        'train_rr': train_rr_bal,
-        'train_freq': train_freq_bal,
+        'train_ppg': train_ppg,
+        'train_rr': train_rr,
+        'train_freq': train_freq,
         'train_ppg_ssl': train_ppg_ssl,
         'val_ppg': val_ppg,
         'val_rr': val_rr,
