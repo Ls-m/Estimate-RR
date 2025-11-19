@@ -724,6 +724,7 @@ def augment_ppg_segment(ppg):
 
     return ppg_aug
 
+
 def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
     """
     1. Finds the majority class count.
@@ -762,17 +763,23 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
     # 3. Generate Data for Minority Classes
     for bin_idx, indices in class_indices.items():
         current_count = len(indices)
+        
+        # --- FIX START: CHECK FOR EMPTY CLASS ---
+        if current_count == 0:
+            print(f"Warning: Class {bin_idx} is EMPTY in this fold. Skipping augmentation.")
+            continue
+        # --- FIX END ---
+
         needed = target_count - current_count
         
         if needed <= 0:
             continue
             
-        print(f"Class {bin_idx}: Generating {needed} new samples...")
+        print(f"Class {bin_idx}: Generating {needed} new samples from {current_count} sources...")
         
         # Generate 'needed' samples
         for k in range(needed):
-            # Pick a random source sample from this class to base the augmentation on
-            # We cycle through existing samples
+            # Pick a random source sample to base the augmentation on
             source_idx = indices[k % current_count] 
             
             src_ppg = ppg_list[source_idx]
@@ -781,10 +788,10 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
             # A. Create augmented PPG
             aug_ppg_seg = augment_ppg_segment(src_ppg)
             
-            # B. Copy Label (Label is valid because we didn't time-stretch)
+            # B. Copy Label
             aug_rr_seg = copy.deepcopy(src_rr)
             
-            # C. Generate NEW Scalogram (Crucial step!)
+            # C. Generate NEW Scalogram
             aug_freq_seg = generate_cwt_scalogram(
                 aug_ppg_seg, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8
             )
