@@ -70,80 +70,53 @@ def make_balanced_sampler(rr_targets):
     return sampler
 
 
-
+    
 class PPGRRDataset(torch.utils.data.Dataset):
     def __init__(self, cfg, ppg_data, rr_labels, freq_data, augment=False):
+        # ... existing init ...
         self.augment = augment
         self.ppg_data = ppg_data
         self.rr_data = rr_labels
         self.freq_data = freq_data
         self.cfg = cfg
 
-        # --- NORMAL Augmentation (Weak) ---
-        # Used for everyone if augment=True to prevent general overfitting
-        self.weak_freq_mask = T.FrequencyMasking(freq_mask_param=10)
-        self.weak_time_mask = T.TimeMasking(time_mask_param=5)
+        if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
+            logger.info(f"nan or inf in ppg_data")
+        
+        if np.any(np.isnan(rr_labels)) or np.any(np.isinf(rr_labels)):
+            logger.info(f"nan or inf in rr_data")
 
-        # --- RARE Augmentation (Aggressive) ---
-        # Used ONLY for rare cases to force the model to learn robust features
-        self.strong_freq_mask = T.FrequencyMasking(freq_mask_param=30) # Mask big chunks of freq
-        self.strong_time_mask = T.TimeMasking(time_mask_param=15)      # Mask big chunks of time
+        # Define augmentations
+        # Mask up to 20 frequency bins (out of 128)
+        self.freq_masking = T.FrequencyMasking(freq_mask_param=20)
+        # Mask up to 10 time steps (out of 60)
+        self.time_masking = T.TimeMasking(time_mask_param=10)
 
     def __len__(self):
         return len(self.ppg_data)
     
     def __getitem__(self, idx):
+        # ... load data ...
+        # Let's assume 'scalogram' is your (128, 60) numpy array
         ppg_segment = self.ppg_data[idx]
         rr = self.rr_data[idx]
         freq = self.freq_data[idx]
-        
-        # Convert to tensor
-        scalogram_tensor = torch.tensor(freq, dtype=torch.float32) # (128, 60)
-        
-        # Calculate Mean RR for this segment to decide strategy
-        mean_rr = np.mean(rr)
+        scalogram_tensor = torch.tensor(freq) # (128, 60)
         
         if self.augment:
-            # SpecAugment requires channel dim: (1, Freq, Time)
+            # SpecAugment expects (Channel, Freq, Time)
             scalogram_tensor = scalogram_tensor.unsqueeze(0)
             
-            # --- LOGIC: Check if Rare ---
-            is_rare = (mean_rr < 12.0) or (mean_rr > 20.0)
-            
-            if is_rare:
-                # === STRATEGY 1: AGGRESSIVE MASKING ===
-                # Mask twice to make it really hard
-                scalogram_tensor = self.strong_freq_mask(scalogram_tensor)
-                scalogram_tensor = self.strong_time_mask(scalogram_tensor)
-                
-                # === STRATEGY 2: INTENSITY SCALING ===
-                # Simulate different sensor pressures/perfusion
-                # Multiply by random factor between 0.7 and 1.3
-                scale_factor = torch.empty(1).uniform_(0.7, 1.3)
-                scalogram_tensor = scalogram_tensor * scale_factor
-                
-                # === STRATEGY 3: GAUSSIAN NOISE ===
-                # Add random static to simulate bad sensor contact
-                noise = torch.randn_like(scalogram_tensor) * 0.05
-                scalogram_tensor = scalogram_tensor + noise
-                
-            else:
-                # === Normal Samples: Weak Augmentation ===
-                # Just enough to prevent memorization, but keep signal clean
-                scalogram_tensor = self.weak_freq_mask(scalogram_tensor)
-                scalogram_tensor = self.weak_time_mask(scalogram_tensor)
-
-            # Clamp to ensure we stay in valid image range after noise/scaling
-            scalogram_tensor = torch.clamp(scalogram_tensor, 0.0, 1.0)
+            # Apply masking
+            scalogram_tensor = self.freq_masking(scalogram_tensor)
+            scalogram_tensor = self.time_masking(scalogram_tensor)
             
             # Remove channel dim
             scalogram_tensor = scalogram_tensor.squeeze(0)
 
         ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32)
         rr_tensor = torch.tensor(rr, dtype=torch.float32)
-        
         return ppg_tensor, rr_tensor, scalogram_tensor
-    
 
 # class PPGRRDataset(Dataset):
 #     def __init__(self, cfg, ppg_data, rr_data, freq_data, augment=False):
@@ -211,8 +184,8 @@ class PPGRRDataModule(LightningDataModule):
             self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            sampler=sampler,      # <--- ADD THIS
-            shuffle=False,        # <--- MUST BE FALSE when using sampler
+            # sampler=sampler,      # <--- ADD THIS
+            shuffle=True,        # <--- MUST BE FALSE when using sampler
             pin_memory=True,
             persistent_workers=(self.num_workers > 0)
         )

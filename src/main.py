@@ -33,7 +33,7 @@ import random
 
 from model import FreqSSLPretrainModule
 from dataset import FrequencySSLDataset
-
+from utils import balance_dataset_with_synthesis
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -1361,6 +1361,10 @@ def create_data_splits(cv_split, processed_data):
             test_ppg_ssl_list.append(processed_data[test_subject][3])
         else:
             logger.warning(f"Test subject {test_subject} not found in processed data.")
+
+    train_ppg_list, train_rr_list, train_freq_list = balance_dataset_with_synthesis(
+        train_ppg_list, train_rr_list, train_freq_list
+    )
     train_ppg = np.concatenate(train_ppg_list, axis=0).tolist()
     train_rr = np.concatenate(train_rr_list, axis=0).tolist()
     train_freq = np.concatenate(train_freq_list, axis=0).tolist()
