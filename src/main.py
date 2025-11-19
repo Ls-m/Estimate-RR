@@ -33,7 +33,7 @@ import random
 
 from model import FreqSSLPretrainModule
 from dataset import FrequencySSLDataset
-from utils import balance_dataset_with_synthesis
+import copy
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -824,7 +824,126 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
     return psd_band.astype(np.float32)
 
+def augment_ppg_segment(ppg):
+    """
+    Apply random noise/scaling/drift to a PPG segment.
+    """
+    # --- FIX: Convert to Numpy Array first ---
+    ppg = np.array(ppg, dtype=np.float32)
+    # -----------------------------------------
 
+    aug_type = np.random.choice(['noise', 'drift', 'burst'])
+    
+    # Base scaling (simulates perfusion changes)
+    scale = np.random.uniform(0.7, 1.3)
+    ppg_aug = ppg * scale  # Now this works!
+    
+    if aug_type == 'noise':
+        # Gaussian White Noise
+        noise = np.random.normal(0, 0.05, len(ppg)) * np.std(ppg)
+        ppg_aug = ppg_aug + noise
+        
+    elif aug_type == 'drift':
+        # Baseline Wander
+        t = np.linspace(0, 1, len(ppg))
+        freq = np.random.uniform(0.05, 0.2) 
+        drift = np.sin(2 * np.pi * freq * t) * np.std(ppg) * 0.5
+        ppg_aug = ppg_aug + drift
+        
+    elif aug_type == 'burst':
+        # Short burst
+        burst_start = np.random.randint(0, len(ppg) - 20)
+        burst_len = np.random.randint(10, 50)
+        noise_burst = np.random.normal(0, 0.5, burst_len) * np.std(ppg)
+        ppg_aug[burst_start:burst_start+burst_len] += noise_burst
+
+    return ppg_aug
+
+
+def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
+    """
+    1. Finds the majority class count.
+    2. Generates synthetic data for all other classes until they match the majority count.
+    """
+    print("--- Starting Dataset Balancing (Oversampling via Synthesis) ---")
+    
+    # 1. Organize Indices by Class
+    class_indices = {
+        0: [], # < 10
+        1: [], # 10-15
+        2: [], # 15-20
+        3: [], # 20-25
+        4: []  # > 25
+    }
+    
+    # Scan the dataset
+    for i, rr in enumerate(rr_list):
+        mean_rr = np.mean(rr)
+        if mean_rr < 10: bin_idx = 0
+        elif 10 <= mean_rr < 15: bin_idx = 1
+        elif 15 <= mean_rr < 20: bin_idx = 2
+        elif 20 <= mean_rr < 25: bin_idx = 3
+        else: bin_idx = 4
+        class_indices[bin_idx].append(i)
+
+    # 2. Find the Target Count (Majority Class)
+    counts = [len(idxs) for idxs in class_indices.values()]
+    target_count = max(counts)
+    print(f"Initial Counts: {counts}")
+    print(f"Target per class: {target_count}")
+    
+    # Lists for the NEW synthetic data
+    new_ppg, new_rr, new_freq = [], [], []
+    
+    # 3. Generate Data for Minority Classes
+    for bin_idx, indices in class_indices.items():
+        current_count = len(indices)
+        
+        # --- FIX START: CHECK FOR EMPTY CLASS ---
+        if current_count == 0:
+            print(f"Warning: Class {bin_idx} is EMPTY in this fold. Skipping augmentation.")
+            continue
+        # --- FIX END ---
+
+        needed = target_count - current_count
+        
+        if needed <= 0:
+            continue
+            
+        print(f"Class {bin_idx}: Generating {needed} new samples from {current_count} sources...")
+        
+        # Generate 'needed' samples
+        for k in range(needed):
+            # Pick a random source sample to base the augmentation on
+            source_idx = indices[k % current_count] 
+            
+            src_ppg = ppg_list[source_idx]
+            src_rr = rr_list[source_idx]
+            
+            # A. Create augmented PPG
+            aug_ppg_seg = augment_ppg_segment(src_ppg)
+            
+            # B. Copy Label
+            aug_rr_seg = copy.deepcopy(src_rr)
+            
+            # C. Generate NEW Scalogram
+            aug_freq_seg = generate_cwt_scalogram(
+                aug_ppg_seg, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8
+            )
+            
+            new_ppg.append(aug_ppg_seg)
+            new_rr.append(aug_rr_seg)
+            new_freq.append(aug_freq_seg)
+            
+    # 4. Combine everything
+    final_ppg = ppg_list + new_ppg
+    final_rr = rr_list + new_rr
+    final_freq = freq_list + new_freq
+    
+    print(f"Balancing Complete. Added {len(new_ppg)} synthetic samples.")
+    print(f"Final Dataset Size: {len(final_ppg)}")
+    
+    return final_ppg, final_rr, final_freq
 import numpy as np
 import pywt
 from skimage.transform import resize
