@@ -8,6 +8,62 @@ logger = logging.getLogger("Dataset")
 
 import torchaudio.transforms as T
 
+
+import torch
+import numpy as np
+
+def make_balanced_sampler(rr_targets):
+    """
+    Creates a WeightedRandomSampler to handle class imbalance in regression.
+    
+    Args:
+        rr_targets: List or Array of all RR labels in the training set (e.g., [12, 18, 24, ...])
+        
+    Returns:
+        sampler: A torch.utils.data.WeightedRandomSampler
+    """
+    rr_targets = np.array(rr_targets)
+    
+    # 1. Define Bins for "Classes"
+    # Class 0: < 12 (Low)
+    # Class 1: 12 - 20 (Normal)
+    # Class 2: > 20 (High)
+    
+    conditions = [
+        (rr_targets < 12),
+        (rr_targets >= 12) & (rr_targets <= 20),
+        (rr_targets > 20)
+    ]
+    choices = [0, 1, 2]
+    
+    # Assign a class ID to every sample
+    classes = np.select(conditions, choices, default=1)
+    
+    # 2. Calculate Count per Class
+    class_counts = np.bincount(classes)
+    
+    # Avoid division by zero if a class is empty (unlikely but safe)
+    class_counts[class_counts == 0] = 1 
+    
+    # 3. Calculate Weight per Class
+    # Weight = 1 / Count (Inverse Frequency)
+    class_weights = 1. / class_counts
+    
+    # 4. Assign weight to every sample
+    sample_weights = class_weights[classes]
+    
+    # 5. Create Sampler
+    # replacement=True is CRITICAL. It allows picking the same rare sample 
+    # multiple times in one epoch.
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights=torch.from_numpy(sample_weights).double(),
+        num_samples=len(sample_weights),
+        replacement=True
+    )
+    
+    print(f"Sampler Weights -> Low: {class_weights[0]:.4f}, Norm: {class_weights[1]:.4f}, High: {class_weights[2]:.4f}")
+    return sampler
+
 class PPGRRDataset(torch.utils.data.Dataset):
     def __init__(self, cfg, ppg_data, rr_labels, freq_data, augment=False):
         # ... existing init ...
@@ -109,7 +165,24 @@ class PPGRRDataModule(LightningDataModule):
         self.num_workers = num_workers
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, persistent_workers=True)
+        # Example: accessing labels directly from the stored list in dataset
+        train_labels = self.train_dataset.rr_data # Or whatever variable holds the Y targets
+        
+        # Calculate the mean RR for each 60-value segment
+        mean_rr_targets = [np.mean(segment) for segment in train_labels]
+        # 2. Create the sampler
+        sampler = make_balanced_sampler(mean_rr_targets)
+
+        return torch.utils.data.DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            sampler=sampler,      # <--- ADD THIS
+            shuffle=False,        # <--- MUST BE FALSE when using sampler
+            pin_memory=True,
+            persistent_workers=(self.num_workers > 0)
+        )
+        # return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, persistent_workers=True)
 
     def val_dataloader(self):
         return torch.utils.data.DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True)
