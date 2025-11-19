@@ -1482,11 +1482,22 @@ def create_data_splits(cv_split, processed_data):
             logger.warning(f"Test subject {test_subject} not found in processed data.")
 
     
-    train_ppg = np.concatenate(train_ppg_list, axis=0).tolist()
-    train_rr = np.concatenate(train_rr_list, axis=0).tolist()
-    train_freq = np.concatenate(train_freq_list, axis=0).tolist()
-    train_ppg, train_rr, train_freq = balance_dataset_with_synthesis(
-        train_ppg, train_rr, train_freq
+    train_ppg_flat = np.concatenate(train_ppg_list, axis=0).tolist()
+    train_rr_flat = np.concatenate(train_rr_list, axis=0).tolist()
+    train_freq_flat = np.concatenate(train_freq_list, axis=0).tolist()
+    
+    # --- DEBUG CHECK ---
+    # If this prints a shape like (141, 7500), we have a problem. 
+    # It should print a length (e.g., 7500).
+    first_sample = np.array(train_ppg_flat[0])
+    logger.info(f"DEBUG: First training sample shape: {first_sample.shape}")
+    if first_sample.ndim > 1:
+        raise ValueError(f"Data not flattened! Expected 1D segment, got shape {first_sample.shape}")
+
+    # --- STEP 2: BALANCE DATASET ---
+    # Now we pass the flattened lists.
+    train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
+        train_ppg_flat, train_rr_flat, train_freq_flat
     )
     val_ppg = np.concatenate(val_ppg_list, axis=0).tolist()
     val_rr = np.concatenate(val_rr_list, axis=0).tolist()
@@ -1503,15 +1514,15 @@ def create_data_splits(cv_split, processed_data):
     # logger.info(f"val ppg shape: {val_ppg.shape}, val rr shape: {val_rr.shape}")
     # logger.info(f"test ppg shape: {test_ppg.shape}, test rr shape: {test_rr.shape}")
     id = cv_split["fold_id"]
-    logger.info(f"total number of segments in this fold {id} is {len(train_ppg)+len(val_ppg)+len(test_ppg)}")
-    logger.info(f"number of train segments is {len(train_ppg)}, number of val segments is{len(val_ppg)}, number of test segments is{len(test_ppg)}")
+    logger.info(f"total number of segments in this fold {id} is {len(train_ppg_bal)+len(val_ppg)+len(test_ppg)}")
+    logger.info(f"number of train segments is {len(train_ppg_bal)}, number of val segments is{len(val_ppg)}, number of test segments is{len(test_ppg)}")
 
     logger.info(f"total number of subjects in this fold {id} is {len(train_subjects)+len(validation_subjects)+len(test_subjects)}")
     logger.info(f"number of train subjects is {len(train_subjects)}, number of val subjects is{len(validation_subjects)}, number of test subjects is{len(test_subjects)}")
     return {
-        'train_ppg': train_ppg,
-        'train_rr': train_rr,
-        'train_freq': train_freq,
+        'train_ppg': train_ppg_bal,
+        'train_rr': train_rr_bal,
+        'train_freq': train_freq_bal,
         'train_ppg_ssl': train_ppg_ssl,
         'val_ppg': val_ppg,
         'val_rr': val_rr,
