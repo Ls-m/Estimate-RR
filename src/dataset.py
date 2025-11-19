@@ -14,54 +14,59 @@ import numpy as np
 
 def make_balanced_sampler(rr_targets):
     """
-    Creates a WeightedRandomSampler to handle class imbalance in regression.
+    Creates a WeightedRandomSampler using 5 specific RR bins.
     
     Args:
-        rr_targets: List or Array of all RR labels in the training set (e.g., [12, 18, 24, ...])
+        rr_targets: List or Array of all mean RR labels in the training set (e.g., [17.5, 9.2, 26.1, ...])
         
     Returns:
         sampler: A torch.utils.data.WeightedRandomSampler
     """
     rr_targets = np.array(rr_targets)
     
-    # 1. Define Bins for "Classes"
-    # Class 0: < 12 (Low)
-    # Class 1: 12 - 20 (Normal)
-    # Class 2: > 20 (High)
+    # 1. Define 5 Bins and Conditions
+    # Class 0: < 10.0 (Extreme Low/Bradypnea)
+    # Class 1: 10.0 <= RR < 15.0 (Low/Moderate)
+    # Class 2: 15.0 <= RR < 20.0 (Normal/Eupnea - The Majority)
+    # Class 3: 20.0 <= RR < 25.0 (High/Moderate)
+    # Class 4: >= 25.0 (Extreme High/Tachypnea)
     
     conditions = [
-        (rr_targets < 12),
-        (rr_targets >= 12) & (rr_targets <= 20),
-        (rr_targets > 20)
+        (rr_targets < 10.0),
+        (rr_targets >= 10.0) & (rr_targets < 15.0),
+        (rr_targets >= 15.0) & (rr_targets < 20.0),
+        (rr_targets >= 20.0) & (rr_targets < 25.0),
+        (rr_targets >= 25.0)
     ]
-    choices = [0, 1, 2]
+    choices = [0, 1, 2, 3, 4]
     
     # Assign a class ID to every sample
-    classes = np.select(conditions, choices, default=1)
+    classes = np.select(conditions, choices, default=2) # Default to Class 2 (Normal)
     
     # 2. Calculate Count per Class
     class_counts = np.bincount(classes)
+    class_counts[class_counts == 0] = 1 # Avoid division by zero
     
-    # Avoid division by zero if a class is empty (unlikely but safe)
-    class_counts[class_counts == 0] = 1 
-    
-    # 3. Calculate Weight per Class
-    # Weight = 1 / Count (Inverse Frequency)
+    # 3. Calculate Weight per Class (Inverse Frequency)
     class_weights = 1. / class_counts
     
     # 4. Assign weight to every sample
     sample_weights = class_weights[classes]
     
     # 5. Create Sampler
-    # replacement=True is CRITICAL. It allows picking the same rare sample 
-    # multiple times in one epoch.
     sampler = torch.utils.data.WeightedRandomSampler(
         weights=torch.from_numpy(sample_weights).double(),
         num_samples=len(sample_weights),
         replacement=True
     )
     
-    print(f"Sampler Weights -> Low: {class_weights[0]:.4f}, Norm: {class_weights[1]:.4f}, High: {class_weights[2]:.4f}")
+    print("\n--- Sampler Configuration ---")
+    print(f"Total Samples: {len(sample_weights)}")
+    print(f"Classes (Counts, Weights):")
+    for i in range(len(class_counts)):
+        print(f"  Class {choices[i]} ({conditions[i]}): Count={class_counts[i]}, Weight={class_weights[i]:.5f}")
+    print("-----------------------------\n")
+
     return sampler
 
 class PPGRRDataset(torch.utils.data.Dataset):
