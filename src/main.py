@@ -1481,12 +1481,13 @@ def create_data_splits(cv_split, processed_data):
         else:
             logger.warning(f"Test subject {test_subject} not found in processed data.")
 
-    train_ppg_list, train_rr_list, train_freq_list = balance_dataset_with_synthesis(
-        train_ppg_list, train_rr_list, train_freq_list
-    )
+    
     train_ppg = np.concatenate(train_ppg_list, axis=0).tolist()
     train_rr = np.concatenate(train_rr_list, axis=0).tolist()
     train_freq = np.concatenate(train_freq_list, axis=0).tolist()
+    train_ppg, train_rr, train_freq = balance_dataset_with_synthesis(
+        train_ppg, train_rr, train_freq
+    )
     val_ppg = np.concatenate(val_ppg_list, axis=0).tolist()
     val_rr = np.concatenate(val_rr_list, axis=0).tolist()
     val_freq = np.concatenate(val_freq_list, axis=0).tolist()
