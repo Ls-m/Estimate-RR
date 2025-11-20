@@ -825,18 +825,15 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
     return psd_band.astype(np.float32)
 
 def augment_ppg_segment(ppg):
-    """
-    Apply random noise/scaling/drift to a PPG segment.
-    """
-    # --- FIX: Convert to Numpy Array first ---
+    # 1. Ensure Numpy
     ppg = np.array(ppg, dtype=np.float32)
-    # -----------------------------------------
+    
+    if ppg.ndim != 1:
+        raise ValueError(f"augment_ppg_segment expected 1D array, got {ppg.shape}")
 
     aug_type = np.random.choice(['noise', 'drift', 'burst'])
-    
-    # Base scaling (simulates perfusion changes)
     scale = np.random.uniform(0.7, 1.3)
-    ppg_aug = ppg * scale  # Now this works!
+    ppg_aug = ppg * scale 
     
     if aug_type == 'noise':
         # Gaussian White Noise
@@ -851,11 +848,20 @@ def augment_ppg_segment(ppg):
         ppg_aug = ppg_aug + drift
         
     elif aug_type == 'burst':
-        # Short burst
-        burst_start = np.random.randint(0, len(ppg) - 20)
+        # --- FIX START ---
+        # 1. Decide length first
         burst_len = np.random.randint(10, 50)
-        noise_burst = np.random.normal(0, 0.5, burst_len) * np.std(ppg)
-        ppg_aug[burst_start:burst_start+burst_len] += noise_burst
+        
+        # 2. Calculate the maximum safe starting index
+        max_start = len(ppg) - burst_len
+        
+        if max_start > 0:
+            # 3. Pick start so it fits
+            burst_start = np.random.randint(0, max_start)
+            
+            noise_burst = np.random.normal(0, 0.5, burst_len) * np.std(ppg)
+            ppg_aug[burst_start : burst_start + burst_len] += noise_burst
+        # --- FIX END ---
 
     return ppg_aug
 
