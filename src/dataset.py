@@ -184,8 +184,8 @@ class PPGRRDataModule(LightningDataModule):
             self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            sampler=sampler,      # <--- ADD THIS
-            shuffle=False,        # <--- MUST BE FALSE when using sampler
+            # sampler=sampler,      # <--- ADD THIS
+            shuffle=True,        # <--- MUST BE FALSE when using sampler
             pin_memory=True,
             persistent_workers=(self.num_workers > 0)
         )

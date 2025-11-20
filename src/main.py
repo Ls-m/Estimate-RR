@@ -30,7 +30,7 @@ from skimage.transform import resize
 import torch.distributed as dist
 from sklearn.model_selection import KFold
 import random
-
+from skimage.transform import resize
 from model import FreqSSLPretrainModule
 from dataset import FrequencySSLDataset
 import copy
@@ -943,9 +943,7 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
     print(f"Final Dataset Size: {len(final_ppg)}")
     
     return final_ppg, final_rr, final_freq
-import numpy as np
-import pywt
-from skimage.transform import resize
+
 
 def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
     """
@@ -1054,7 +1052,7 @@ def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
     def process_single(segment):
-        return generate_cwt_scalogram(segment, fs, use_fake=False)
+        return generate_cwt_scalogram(segment, fs, use_fake=True)
         # return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
@@ -1488,16 +1486,16 @@ def create_data_splits(cv_split, processed_data):
     # --- DEBUG CHECK ---
     # If this prints a shape like (141, 7500), we have a problem. 
     # It should print a length (e.g., 7500).
-    # first_sample = np.array(train_ppg_flat[0])
-    # logger.info(f"DEBUG: First training sample shape: {first_sample.shape}")
-    # if first_sample.ndim > 1:
-    #     raise ValueError(f"Data not flattened! Expected 1D segment, got shape {first_sample.shape}")
+    first_sample = np.array(train_ppg[0])
+    logger.info(f"DEBUG: First training sample shape: {first_sample.shape}")
+    if first_sample.ndim > 1:
+        raise ValueError(f"Data not flattened! Expected 1D segment, got shape {first_sample.shape}")
 
     # --- STEP 2: BALANCE DATASET ---
-    # Now we pass the flattened lists.
-    # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
-    #     train_ppg_flat, train_rr_flat, train_freq_flat
-    # )
+    #Now we pass the flattened lists.
+    train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
+        train_ppg, train_rr, train_freq
+    )
     val_ppg = np.concatenate(val_ppg_list, axis=0).tolist()
     val_rr = np.concatenate(val_rr_list, axis=0).tolist()
     val_freq = np.concatenate(val_freq_list, axis=0).tolist()
@@ -1519,9 +1517,9 @@ def create_data_splits(cv_split, processed_data):
     logger.info(f"total number of subjects in this fold {id} is {len(train_subjects)+len(validation_subjects)+len(test_subjects)}")
     logger.info(f"number of train subjects is {len(train_subjects)}, number of val subjects is{len(validation_subjects)}, number of test subjects is{len(test_subjects)}")
     return {
-        'train_ppg': train_ppg,
-        'train_rr': train_rr,
-        'train_freq': train_freq,
+        'train_ppg': train_ppg_bal,
+        'train_rr': train_rr_bal,
+        'train_freq': train_freq_bal,
         'train_ppg_ssl': train_ppg_ssl,
         'val_ppg': val_ppg,
         'val_rr': val_rr,
