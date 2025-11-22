@@ -1834,6 +1834,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
             ssl_trainer = pl.Trainer(
                 max_epochs=cfg.ssl.max_epochs,
                 accelerator="auto",
+                strategy='ddp_find_unused_parameters_true',
                 devices=cfg.hardware.devices,
                 logger=ssl_logger,
                 log_every_n_steps=1,
