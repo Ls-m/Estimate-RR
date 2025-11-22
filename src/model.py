@@ -672,13 +672,13 @@ class SSLPretrainModule(pl.LightningModule):
         
         # 1. Initialize the Main Model Architecture
         self.encoder = RWKVScalogramModel(
-            hidden_size=256, 
-            num_layers=2, 
+            hidden_size=128, 
+            num_layers=1, 
             dropout=cfg.training.dropout
         )
         
         # 2. SSL Classification Head (3 Classes)
-        self.ssl_head = nn.Linear(256, 3)
+        self.ssl_head = nn.Linear(128, 3)
 
     def forward(self, x):
         # Return embedding vector
@@ -693,13 +693,13 @@ class SSLPretrainModule(pl.LightningModule):
         
         loss = F.cross_entropy(logits, label)
         
-        self.log("ssl_train_loss", loss, prog_bar=True)
+        self.log("ssl_train_loss", loss, prog_bar=True, sync_dist=True)
         
         # Calculate Acc
         preds = torch.argmax(logits, dim=1)
         acc = (preds == label).float().mean()
-        self.log("ssl_acc", acc, prog_bar=True)
-        
+        self.log("ssl_acc", acc, prog_bar=True, sync_dist=True)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -711,8 +711,8 @@ class SSLPretrainModule(pl.LightningModule):
         preds = torch.argmax(logits, dim=1)
         acc = (preds == label).float().mean()
         
-        self.log("ssl_val_loss", loss, prog_bar=True)
-        self.log("ssl_val_acc", acc, prog_bar=True)
+        self.log("ssl_val_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("ssl_val_acc", acc, prog_bar=True, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
@@ -867,8 +867,8 @@ class RRLightningModule(pl.LightningModule):
             #     dropout_rate=cfg.training.dropout
             # )
             self.freq_model = RWKVScalogramModel(
-                hidden_size=256,     # Internal vector size (try 128 or 256)
-                num_layers=2,        # Depth of the model
+                hidden_size=128,     # Internal vector size (try 128 or 256)
+                num_layers=1,        # Depth of the model
                 dropout=cfg.training.dropout
             )
             # self.freq_model = AdvancedScalogramEncoder(
