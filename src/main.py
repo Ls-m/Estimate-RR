@@ -1824,7 +1824,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
             )
 
             ssl_checkpoint_callback = ModelCheckpoint(
-                monitor='val_loss',
+                monitor='ssl_val_loss',
                 dirpath=ssl_logger.log_dir,
                 filename='ssl-best-checkpoint',
                 save_top_k=1,
