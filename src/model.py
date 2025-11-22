@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 from rwkv_freq import RWKVScalogramModel
+
+
 def ppg_augmentation(x, crop_ratio=0.8):
     """
     Applies a simple random temporal crop augmentation to a batch of PPG signals.
@@ -660,9 +662,62 @@ class RobustScalogramEncoder(nn.Module):
 
         return x
 
-import pytorch_lightning as pl
-import torch.nn as nn
-import torch.nn.functional as F
+
+
+class SSLPretrainModule(pl.LightningModule):
+    def __init__(self, cfg):
+        super().__init__()
+        self.save_hyperparameters()
+        self.cfg = cfg
+        
+        # 1. Initialize the Main Model Architecture
+        self.encoder = RWKVScalogramModel(
+            hidden_size=256, 
+            num_layers=2, 
+            dropout=cfg.training.dropout
+        )
+        
+        # 2. SSL Classification Head (3 Classes)
+        self.ssl_head = nn.Linear(256, 3)
+
+    def forward(self, x):
+        # Return embedding vector
+        return self.encoder(x, return_embedding=True)
+
+    def training_step(self, batch, batch_idx):
+        scalogram, label = batch
+        
+        # Get embedding -> Classify
+        embedding = self(scalogram)
+        logits = self.ssl_head(embedding)
+        
+        loss = F.cross_entropy(logits, label)
+        
+        self.log("ssl_train_loss", loss, prog_bar=True)
+        
+        # Calculate Acc
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == label).float().mean()
+        self.log("ssl_acc", acc, prog_bar=True)
+        
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        scalogram, label = batch
+        embedding = self(scalogram)
+        logits = self.ssl_head(embedding)
+        loss = F.cross_entropy(logits, label)
+        
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == label).float().mean()
+        
+        self.log("ssl_val_loss", loss, prog_bar=True)
+        self.log("ssl_val_acc", acc, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-3, weight_decay=0.01)
+        return optimizer
 
 class FreqSSLPretrainModule(pl.LightningModule):
     def __init__(self, cfg):
@@ -825,7 +880,7 @@ class RRLightningModule(pl.LightningModule):
             # Only load if we are in freq_only mode (or handle fusion logic separately)
             if self.ablation_mode == "freq_only" and cfg.training.get("pretrained_path"):
                 pretrained_path = cfg.training.get("pretrained_path")
-                print(f"Loading pretrained FREQ encoder from: {pretrained_path}")
+                print(f"Loading pretrained FREQ Timewarp encoder from: {pretrained_path}")
                 
                 map_location = {'cuda:0': f'cuda:{dist.get_rank()}'} if torch.cuda.is_available() and dist.is_initialized() else 'cpu'
                 
@@ -1117,123 +1172,123 @@ class RRLightningModule(pl.LightningModule):
 
 
 
-class SSLPretrainModule(pl.LightningModule):
+# class SSLPretrainModule(pl.LightningModule):
 
-    def __init__(self, cfg, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
-        super().__init__()
-        self.save_hyperparameters()
+#     def __init__(self, cfg, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
+#         super().__init__()
+#         self.save_hyperparameters()
 
-        if cfg.training.model_name == "LSTMRR":
-            self.encoder = LSTMRRModel(output_size=64)
-        elif cfg.training.model_name == "RWKV":
-            self.encoder = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
-        elif cfg.training.model_name == "RWKVTime":
-            self.encoder = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
-        # elif cfg.training.model_name == "OptimizedRWKVRRModel":
-        #     self.encoder = OptimizedRWKVRRModel(input_size=1,
-        #             hidden_size=cfg.training.time_model_output_dim,
-        #             num_layers=cfg.training.time_model_num_layers,
-        #             dropout=cfg.training.dropout,
-        #             output_size=cfg.training.time_model_output_dim)
-            # self.encoder.enable_optimizations()
-        # elif cfg.training.model_name == "RWKVTimeOPT":
-        #     self.encoder = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
+#         if cfg.training.model_name == "LSTMRR":
+#             self.encoder = LSTMRRModel(output_size=64)
+#         elif cfg.training.model_name == "RWKV":
+#             self.encoder = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
+#         elif cfg.training.model_name == "RWKVTime":
+#             self.encoder = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
+#         # elif cfg.training.model_name == "OptimizedRWKVRRModel":
+#         #     self.encoder = OptimizedRWKVRRModel(input_size=1,
+#         #             hidden_size=cfg.training.time_model_output_dim,
+#         #             num_layers=cfg.training.time_model_num_layers,
+#         #             dropout=cfg.training.dropout,
+#         #             output_size=cfg.training.time_model_output_dim)
+#             # self.encoder.enable_optimizations()
+#         # elif cfg.training.model_name == "RWKVTimeOPT":
+#         #     self.encoder = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
 
-        self.projection_head = nn.Sequential(
-            nn.Linear(32, 128),
-            nn.ReLU(),
-            nn.Linear(128, 32)
-        )
+#         self.projection_head = nn.Sequential(
+#             nn.Linear(32, 128),
+#             nn.ReLU(),
+#             nn.Linear(128, 32)
+#         )
 
     
-    def forward(self, x):
-        return self.encoder(x)
+#     def forward(self, x):
+#         return self.encoder(x)
     
 
-    def info_nce_loss(self, features, temperature):
-        # Create labels that identify positive pairs
-        labels = torch.cat([torch.arange(features.shape[0] // 2) for _ in range(2)], dim=0)
-        labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
-        labels = labels.to(self.device)
+#     def info_nce_loss(self, features, temperature):
+#         # Create labels that identify positive pairs
+#         labels = torch.cat([torch.arange(features.shape[0] // 2) for _ in range(2)], dim=0)
+#         labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
+#         labels = labels.to(self.device)
 
-        # Normalize features
-        features = F.normalize(features, dim=1)
+#         # Normalize features
+#         features = F.normalize(features, dim=1)
         
-        # Calculate cosine similarity matrix
-        similarity_matrix = torch.matmul(features, features.T)
+#         # Calculate cosine similarity matrix
+#         similarity_matrix = torch.matmul(features, features.T)
         
-        # Discard self-similarity from the matrix
-        mask = torch.eye(labels.shape[0], dtype=torch.bool).to(self.device)
-        labels = labels[~mask].view(labels.shape[0], -1)
-        similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
+#         # Discard self-similarity from the matrix
+#         mask = torch.eye(labels.shape[0], dtype=torch.bool).to(self.device)
+#         labels = labels[~mask].view(labels.shape[0], -1)
+#         similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
         
-        # Select positive similarities
-        positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
+#         # Select positive similarities
+#         positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
         
-        # Select negative similarities
-        negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
+#         # Select negative similarities
+#         negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
         
-        logits = torch.cat([positives, negatives], dim=1)
-        # The first column (0) corresponds to the positive pair
-        labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
+#         logits = torch.cat([positives, negatives], dim=1)
+#         # The first column (0) corresponds to the positive pair
+#         labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
         
-        logits = logits / temperature
-        return F.cross_entropy(logits, labels)
+#         logits = logits / temperature
+#         return F.cross_entropy(logits, labels)
     
-    def _shared_step(self, batch):
-        """
-        A shared step for training, validation, and testing to avoid code duplication.
-        """
-        # In SSL, we only need the PPG signal from the batch
-        ppg, _, _ = batch
+#     def _shared_step(self, batch):
+#         """
+#         A shared step for training, validation, and testing to avoid code duplication.
+#         """
+#         # In SSL, we only need the PPG signal from the batch
+#         ppg, _, _ = batch
 
-        # Create two augmented views of the input PPG
-        # NOTE: It's important that augmentation is applied here to get different views
-        # even for the validation and test sets.
-        view1 = ppg_augmentation(ppg)
-        view2 = ppg_augmentation(ppg)
+#         # Create two augmented views of the input PPG
+#         # NOTE: It's important that augmentation is applied here to get different views
+#         # even for the validation and test sets.
+#         view1 = ppg_augmentation(ppg)
+#         view2 = ppg_augmentation(ppg)
 
-        # Get embeddings from the encoder
-        h1 = self.encoder(view1)
-        h2 = self.encoder(view2)
+#         # Get embeddings from the encoder
+#         h1 = self.encoder(view1)
+#         h2 = self.encoder(view2)
 
-        # Get projections from the projection head
-        z1 = self.projection_head(h1)
-        z2 = self.projection_head(h2)
+#         # Get projections from the projection head
+#         z1 = self.projection_head(h1)
+#         z2 = self.projection_head(h2)
 
-        # Concatenate projections for loss calculation
-        features = torch.cat([z1, z2], dim=0)
+#         # Concatenate projections for loss calculation
+#         features = torch.cat([z1, z2], dim=0)
 
-        # Calculate contrastive loss
-        loss = self.info_nce_loss(features, self.hparams.temperature)
-        return loss
+#         # Calculate contrastive loss
+#         loss = self.info_nce_loss(features, self.hparams.temperature)
+#         return loss
 
-    def training_step(self, batch, batch_idx):
-        loss = self._shared_step(batch)
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        return loss
+#     def training_step(self, batch, batch_idx):
+#         loss = self._shared_step(batch)
+#         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+#         return loss
 
-    def validation_step(self, batch, batch_idx):
-        loss = self._shared_step(batch)
-        # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
-        self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
-        return loss
+#     def validation_step(self, batch, batch_idx):
+#         loss = self._shared_step(batch)
+#         # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
+#         self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
+#         return loss
 
-    def test_step(self, batch, batch_idx):
-        loss = self._shared_step(batch)
-        # Log the test loss.
-        self.log('test_loss', loss, on_epoch=True, sync_dist=True)
-        return loss
+#     def test_step(self, batch, batch_idx):
+#         loss = self._shared_step(batch)
+#         # Log the test loss.
+#         self.log('test_loss', loss, on_epoch=True, sync_dist=True)
+#         return loss
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.trainer.max_epochs,
-            eta_min=1e-5
-        )
-        return [optimizer], [scheduler]
+#     def configure_optimizers(self):
+#         optimizer = torch.optim.AdamW(
+#             self.parameters(),
+#             lr=self.hparams.learning_rate,
+#             weight_decay=self.hparams.weight_decay
+#         )
+#         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+#             optimizer,
+#             T_max=self.trainer.max_epochs,
+#             eta_min=1e-5
+#         )
+#         return [optimizer], [scheduler]

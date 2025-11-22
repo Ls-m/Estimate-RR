@@ -34,6 +34,7 @@ from skimage.transform import resize
 from model import FreqSSLPretrainModule
 from dataset import FrequencySSLDataset
 import copy
+from torch.utils.data import Dataset
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -1615,7 +1616,48 @@ def extract_all_segments(processed_data_dict):
 
     return final_ppg, final_rr, final_freq
 
+class TimeWarpSSLDataset(Dataset):
+    def __init__(self, ppg_list, fs=125):
+        self.ppg_list = ppg_list
+        self.fs = fs
+        # Label 0: Slow (Stretched)
+        # Label 1: Normal
+        # Label 2: Fast (Squashed)
 
+    def __len__(self):
+        return len(self.ppg_list)
+
+    def __getitem__(self, idx):
+        raw_ppg = self.ppg_list[idx]
+        L = len(raw_ppg)
+        
+        choice = np.random.choice([0, 1, 2])
+        
+        if choice == 0: # SLOW (Stretch 1.2x - 1.5x)
+            factor = np.random.uniform(1.2, 1.5)
+            new_len = int(L * factor)
+            aug_ppg = signal.resample(raw_ppg, new_len)
+            # Crop center to fit original window
+            start = (new_len - L) // 2
+            aug_ppg = aug_ppg[start : start + L]
+            
+        elif choice == 1: # NORMAL (Identity + Noise)
+            aug_ppg = raw_ppg + np.random.normal(0, 0.05, L) * np.std(raw_ppg)
+            
+        elif choice == 2: # FAST (Squash 0.6x - 0.8x)
+            factor = np.random.uniform(0.6, 0.8)
+            new_len = int(L * factor)
+            aug_ppg_short = signal.resample(raw_ppg, new_len)
+            # Pad with edge values to fill window
+            pad_len = L - new_len
+            aug_ppg = np.pad(aug_ppg_short, (0, pad_len), mode='edge')
+
+        # Generate Scalogram (Must match main training config!)
+        scalogram = generate_cwt_scalogram(
+            aug_ppg, fs=self.fs, target_shape=(128, 60), fmin=0.1, fmax=0.8
+        )
+        
+        return torch.tensor(scalogram).float(), torch.tensor(choice).long()
 def setup_ssl_datamodule(cfg, fold_data, processed_capnobase_ssl, finetune_val_dataset):
     """
     Creates the data module for the SSL pre-training stage.
@@ -1753,20 +1795,26 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
             # --- BRANCH 2: Frequency Domain SSL (NEW) ---
             elif cfg.training.ablation_mode in ["freq_only"]:
-                logger.info(f"[Fold {fold_id}] Starting FREQ SSL Pre-training (Synthetic Injection)...")
+                logger.info(f"[Fold {fold_id}] Starting FREQ SSL Pre-training (Time-Warp Classification)...")
                 
-                # 1. Setup Dataset
-                # Note: We use 'train_ppg' which are raw segments
-                ssl_train_ds = FrequencySSLDataset(fold_data['train_ppg_ssl'], fs=125) # Adjust fs if needed
-                ssl_val_ds   = FrequencySSLDataset(fold_data['val_ppg_ssl'], fs=125)
+                # 1. Setup Time-Warp Dataset
+                # Use the flattened SSL data lists
+                ssl_train_ds = TimeWarpSSLDataset(fold_data['train_ppg_ssl'], fs=125)
+                ssl_val_ds   = TimeWarpSSLDataset(fold_data['val_ppg_ssl'], fs=125)
                 
+                # Create DataModule manually to control sampler/shuffle
                 ssl_data_module = pl.LightningDataModule.from_datasets(
-                    ssl_train_ds, ssl_val_ds, batch_size=cfg.training.batch_size, num_workers=cfg.training.num_workers
+                    ssl_train_ds, 
+                    ssl_val_ds, 
+                    batch_size=cfg.training.batch_size, 
+                    num_workers=cfg.training.num_workers
                 )
+                # Note: from_datasets usually sets shuffle=False for val by default, which is fine.
+                # For train, it usually sets shuffle=True.
                 
-                # 2. Setup Model
-                ssl_model = FreqSSLPretrainModule(cfg)
-                pretrained_path = f"fold_{fold_id}_freq_encoder.pth"
+                # 2. Setup Classification Model
+                ssl_model = SSLPretrainModule(cfg)
+                pretrained_path = f"fold_{fold_id}_ssl_encoder.pth"
 
             # --- Common Training Logic ---
             ssl_logger = TensorBoardLogger(

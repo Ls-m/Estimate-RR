@@ -260,7 +260,7 @@ class RWKVScalogramModel(nn.Module):
             nn.Linear(128, 1)
         )
 
-    def forward(self, x):
+    def forward(self, x, return_embedding=False):
         # Input x: (Batch, Freq=128, Time=60)
         
         # 1. Add Channel Dimension for CNN -> (B, 1, 128, 60)
@@ -285,6 +285,12 @@ class RWKVScalogramModel(nn.Module):
         
         # 4. Run RWKV
         seq_features = self.rwkv(features) 
+
+        # --- SSL BRANCH ---
+        if return_embedding:
+            # Global Average Pooling over Time
+            # We condense the whole 60s sequence into one vector for classification
+            return torch.mean(seq_features, dim=1) # (B, Hidden)
         
         # 5. Apply Head
         out = self.head(seq_features)
