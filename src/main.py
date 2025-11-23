@@ -2039,8 +2039,8 @@ def main(cfg: DictConfig):
     print(segment_counts)
     logger.info(f"number of subjects with zero segments is: {count_zero}")
 
-    min_len = min(segment_counts.values())
-    logger.info(f"minimum number of segments across subjects: {min_len}")
+    # min_len = min(segment_counts.values())
+    # logger.info(f"minimum number of segments across subjects: {min_len}")
     
 
     processed_capnobase_ssl = None  # Initialize to None
