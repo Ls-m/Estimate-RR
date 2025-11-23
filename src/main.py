@@ -126,7 +126,7 @@ def read_data(path):
         dataset_path = os.path.join(path,dataset_name)
         if not os.path.isdir(dataset_path):
             continue
-        if dataset_name == "bidmc":
+        if dataset_name == "bidmc_csv":
             subjects = load_subjects_bidmc(dataset_path)
             # print(subjects)
             
@@ -2015,7 +2015,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 @hydra.main(config_path="../", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     print(cfg)
-    raw_data = read_data("data/")
+    raw_data = read_data(cfg.data.path)
     # print(raw_data['07'][1])
     # exit()
     processed_data = process_data(cfg, raw_data)
