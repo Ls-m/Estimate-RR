@@ -1,6 +1,9 @@
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import logging
 import numpy as np
-import matplotlib.pyplot as plt
+
 import logging
 from scipy import signal
 from scipy.signal import welch,spectrogram, find_peaks

@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 from torch.utils.data import Dataset
 import numpy as np
 import logging
@@ -10,7 +12,7 @@ import torchaudio.transforms as T
 
 
 import torch
-import numpy as np
+
 
 def make_balanced_sampler(rr_targets):
     """

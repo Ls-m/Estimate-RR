@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
@@ -14,7 +17,7 @@ import torch.distributed as dist
 from typing import Tuple, Optional
 import torchmetrics
 import numpy as np
-import matplotlib.pyplot as plt
+
 import seaborn as sns
 import pandas as pd
 from rwkv_freq import RWKVScalogramModel
