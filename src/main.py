@@ -1,6 +1,4 @@
-import matplotlib
-# Force matplotlib to not use any Xwindow/GUI backend
-matplotlib.use('Agg')
+
 import os
 import pandas as pd
 import numpy as np
