@@ -1829,13 +1829,14 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
                 # Use the flattened SSL data lists
                 ssl_train_ds = TimeWarpSSLDataset(fold_data['train_ppg_ssl'], fs=125)
                 ssl_val_ds   = TimeWarpSSLDataset(fold_data['val_ppg_ssl'], fs=125)
-                
+                total_cores = os.cpu_count()
+                optimal_workers = max(4, min(total_cores - 2, 16))
                 # Create DataModule manually to control sampler/shuffle
                 ssl_data_module = SSLDataModule(
                     ssl_train_ds, 
                     ssl_val_ds, 
                     batch_size=cfg.training.batch_size, 
-                    num_workers=8 # <--- INCREASED WORKERS
+                    num_workers=optimal_workers # <--- INCREASED WORKERS
                 )
                 # Note: from_datasets usually sets shuffle=False for val by default, which is fine.
                 # For train, it usually sets shuffle=True.
@@ -1877,7 +1878,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
             if cfg.training.ablation_mode == "time_only":
                 best_model = SSLPretrainModule.load_from_checkpoint(best_ssl_model_path)
             else: 
-                best_model = FreqSSLPretrainModule.load_from_checkpoint(best_ssl_model_path)
+                best_model = SSLPretrainModule.load_from_checkpoint(best_ssl_model_path)
 
             if not dist.is_initialized() or dist.get_rank() == 0:
                 # Both modules have self.encoder, so this line works for both
