@@ -128,7 +128,7 @@ def read_data(path):
         dataset_path = os.path.join(path,dataset_name)
         if not os.path.isdir(dataset_path):
             continue
-        if dataset_name == "bidmc_csv":
+        if dataset_name == "bidmc":
             subjects = load_subjects_bidmc(dataset_path)
             # print(subjects)
             
