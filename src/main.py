@@ -125,6 +125,7 @@ def load_files_capnobase(path,subjects):
 
 def read_data(path):
     # Code to read data goes here
+    raw_data = {}
     for dataset_name in os.listdir(path):
         dataset_path = os.path.join(path,dataset_name)
         if not os.path.isdir(dataset_path):
