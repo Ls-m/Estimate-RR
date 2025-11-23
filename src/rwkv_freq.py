@@ -225,32 +225,32 @@ class RWKVScalogramModel(nn.Module):
         # Input: (Batch, 1, Freq=128, Time=60)
         # We use kernels like (kernel_freq, 1) to process Frequency ONLY, preserving Time.
         
-        # self.feature_extractor = nn.Sequential(
-        #     # Layer 1: Square Kernel (3x3) to capture 2D texture (artifacts vs breath)
-        #     # We pad (1, 1) to keep dimensions consistent before stride
-        #     nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)), 
-        #     nn.BatchNorm2d(32),
-        #     nn.ReLU(),
-            
-        #     # Layer 2: Vertical Kernel (3, 1) to compress Frequency axis further
-        #     nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(),
-        # )
         self.feature_extractor = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            # Layer 1: Square Kernel (3x3) to capture 2D texture (artifacts vs breath)
+            # We pad (1, 1) to keep dimensions consistent before stride
+            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)), 
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+            
+            # Layer 2: Vertical Kernel (3, 1) to compress Frequency axis further
+            nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),
             nn.BatchNorm2d(64),
             nn.ReLU(),
         )
+        # self.feature_extractor = nn.Sequential(
+        #     nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+        #     nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+        #     nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+        #     nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+        # )
         # After 2 strides of 2, Freq 128 becomes 32.
         # Channels are 64.
         # Total feature dimension = 32 * 64 = 2048.
