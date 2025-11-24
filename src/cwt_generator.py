@@ -61,22 +61,24 @@ class PyTorchCWT(nn.Module):
             x = x.unsqueeze(1) # Add channel dim -> (B, 1, 7500)
             
         # 1. Convolve (Compute CWT)
-        # Output: (B, Freq_Bins, Time_Samples)
+        # Output: (B, Freq_Bins, Time_Samples) -> (B, 128, 7500)
         cwt_out = self.conv(x)
         
         # 2. Magnitude
         scalogram = torch.abs(cwt_out)
         
         # 3. Resize (Downsample Time)
-        # Output: (B, Freq_Bins, target_time)
+        # --- FIX IS HERE ---
+        # We use 'linear' because we are treating Freq_Bins as channels 
+        # and only resizing the Time Length.
         scalogram = F.interpolate(
             scalogram, 
-            size=target_time, 
-            mode='bilinear', 
+            size=target_time,   # Integer (60)
+            mode='linear',      # <--- CHANGED FROM 'bilinear'
             align_corners=False
         )
         
-        # 4. Fixed Scaling (Your normalization logic)
+        # 4. Fixed Scaling
         FIXED_MAX_VAL = 6.0
         scalogram = scalogram / FIXED_MAX_VAL
         scalogram = torch.clamp(scalogram, 0.0, 1.0)
