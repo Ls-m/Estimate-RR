@@ -1350,7 +1350,22 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
 
         processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
         # logger.info(f"processed data is {processed_data}")
-        
+        # 1. Compute CPU version (for 1 segment)
+        cpu_seg = generate_cwt_scalogram(ppg_segments[0], fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8)
+
+        # 2. Compute GPU version
+        gpu_batch = compute_freq_features_gpu(ppg_segments[0:1], fs=125)
+        gpu_seg = gpu_batch[0]
+
+        # 3. Compare Visuals
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        ax[0].imshow(cpu_seg, aspect='auto', origin='lower', cmap='viridis')
+        ax[0].set_title("CPU (PyWt)")
+        ax[1].imshow(gpu_seg, aspect='auto', origin='lower', cmap='viridis')
+        ax[1].set_title("GPU (PyTorch)")
+        plt.show()
+        exit()
     return processed_data
 
 
