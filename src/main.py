@@ -883,6 +883,42 @@ def _synthesize_single_sample(src_ppg, src_rr):
     )
     
     return aug_ppg, aug_rr, aug_freq
+
+def process_cwt_on_gpu(ppg_list, device='cuda'):
+    """
+    Takes a list of 1D numpy arrays (PPG), runs CWT on GPU, returns list of 2D arrays.
+    """
+    print(f"Running GPU CWT on {len(ppg_list)} samples...")
+    
+    # 1. Setup Model
+    cwt_model = PyTorchCWT(fs=125, num_scales=128, fmin=0.1, fmax=0.8).to(device)
+    cwt_model.eval()
+    
+    # 2. Prepare Data
+    # Stack into one giant tensor (ensure all segments are 7500 length!)
+    # If you have 5000 samples, this creates (5000, 7500) float32 tensor (~150MB - fits easily)
+    batch_tensor = torch.tensor(np.stack(ppg_list), dtype=torch.float32).to(device)
+    
+    # 3. Run in Batches (to be safe with VRAM)
+    batch_size = 500
+    results = []
+    
+    with torch.no_grad():
+        for i in range(0, len(batch_tensor), batch_size):
+            batch = batch_tensor[i : i + batch_size]
+            
+            # Run CWT
+            # Output: (Batch, 128, 60)
+            out = cwt_model(batch, target_time=60)
+            
+            # Move to CPU and append
+            results.append(out.cpu().numpy())
+            
+    # 4. Concatenate and turn back to list
+    final_array = np.concatenate(results, axis=0)
+    return list(final_array) # List of (128, 60) arrays
+
+
 def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
     print("--- Starting Dataset Balancing (Parallelized) ---")
     
@@ -910,7 +946,7 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
     print(f"Target per class: {target_count}")
     
     new_ppg, new_rr, new_freq = [], [], []
-    
+    new_ppg_raw = []
     # 3. Generate Data
     for bin_idx, indices in class_indices.items():
         current_count = len(indices)
@@ -928,27 +964,30 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
         tasks = []
         for k in range(needed):
             source_idx = indices[k % current_count]
-            tasks.append((ppg_list[source_idx], rr_list[source_idx]))
+            src_ppg = ppg_list[source_idx]
+            src_rr = rr_list[source_idx]
+            
+            # Only augment PPG and Label
+            aug_ppg = augment_ppg_segment(src_ppg)
+            aug_rr = copy.deepcopy(src_rr)
+            
+            new_ppg_raw.append(aug_ppg)
+            new_rr.append(aug_rr)
+            # tasks.append((ppg_list[source_idx], rr_list[source_idx]))
 
-        # --- PARALLEL EXECUTION ---
-        # n_jobs=-1 uses all available CPU cores
-        njobs = max(1, cpu_count() - 6)
-        results = Parallel(n_jobs=njobs)(
-            delayed(_synthesize_single_sample)(p, r) for p, r in tqdm(tasks, desc=f"Class {bin_idx}")
-        )
-        
-        # Unpack results
-        for p, r, f in results:
-            new_ppg.append(p)
-            new_rr.append(r)
-            new_freq.append(f)
-
+     
+    if len(new_ppg_raw) > 0:
+        # Check if GPU available
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        new_freq = process_cwt_on_gpu(new_ppg_raw, device=device)
+    else:
+        new_freq = []
     # 4. Combine
-    final_ppg = ppg_list + new_ppg
+    final_ppg = ppg_list + new_ppg_raw
     final_rr = rr_list + new_rr
     final_freq = freq_list + new_freq
     
-    print(f"Balancing Complete. Added {len(new_ppg)} synthetic samples.")
+    print(f"Balancing Complete. Added {len(new_ppg_raw)} synthetic samples.")
     print(f"Final Dataset Size: {len(final_ppg)}")
     
     return final_ppg, final_rr, final_freq
