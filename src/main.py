@@ -1185,11 +1185,56 @@ def denoise_ppg_with_wavelet(ppg_signal, wavelet='sym8', level=5):
 
     return denoised_signal
 
+def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda'):
+    """
+    Computes CWT scalograms for a list of segments using PyTorch on GPU.
+    """
+    if not ppg_segments:
+        return np.array([])
+
+    # 1. Initialize CWT Model
+    # Ensure parameters match your config (fmax=0.8, num_scales=128)
+    cwt_model = PyTorchCWT(fs=fs, num_scales=128, fmin=0.1, fmax=0.8).to(device)
+    cwt_model.eval()
+
+    # 2. Prepare Data Tensor
+    # Stack list of 1D arrays into a 2D tensor (N, 7500)
+    # We assume all segments have the same length (e.g., 60s * 125Hz = 7500)
+    try:
+        input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
+    except ValueError:
+        # Handle edge case where segments might have different lengths (e.g., end of signal)
+        # If so, you might need to pad them or process individually. 
+        # For now, assuming consistent windowing:
+        print("Error: Segments have mismatching lengths. Falling back to CPU or check segmentation.")
+        return np.array([])
+
+    input_tensor = input_tensor.to(device)
+    
+    all_scalograms = []
+
+    # 3. Run in Batches (to avoid OOM on GPU)
+    with torch.no_grad():
+        for i in range(0, len(input_tensor), batch_size):
+            batch = input_tensor[i : i + batch_size]
+            
+            # Forward pass (returns B, 128, 60)
+            # We use target_time=60 to match your Seq2Seq model
+            scalograms = cwt_model(batch, target_time=60)
+            
+            # Move to CPU and numpy
+            all_scalograms.append(scalograms.cpu().numpy())
+
+    # 4. Concatenate into one array (N, 128, 60)
+    return np.concatenate(all_scalograms, axis=0)
 
 def process_data(cfg, raw_data, dataset_name='bidmc'):
     # Code to process data goes here
     processed_data = {}
- 
+    # Check for GPU availability once
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if device == 'cpu':
+        logger.warning("GPU not available. Preprocessing will be slow.")
     # for subject_data in raw_data:
     for i in range(1,len(raw_data)+1):
         # Example processing: normalize PPG and RR signals
@@ -1289,12 +1334,19 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             window_size_sec=cfg.training.window_size, overlap_sec=cfg.training.overlap
         )
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
-        n_jobs = max(1, cpu_count() - 6)
-        logger.info(f"Compute frequency segments for subject {subject_id}")
-        freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
+        # n_jobs = max(1, cpu_count() - 6)
+        # logger.info(f"Compute frequency segments for subject {subject_id}")
+        # freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
         # freq_segments = compute_freq_features(ppg_segments, original_rate)
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
+
+        logger.info(f"compute frequency segments with gpu")
+        freq_segments = compute_freq_features_gpu(
+            ppg_segments, 
+            fs=original_rate, 
+            device=device
+        )
 
         processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
         # logger.info(f"processed data is {processed_data}")
