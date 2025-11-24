@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')  # Set non-interactive backend
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -996,70 +998,90 @@ class RRLightningModule(pl.LightningModule):
         return loss
         # return loss
     def on_validation_epoch_end(self):
-        # 1. Collect all outputs
-        outputs = self.trainer.callback_metrics # Access stored metrics if needed
-        # Note: PL 2.0+ handles outputs differently. 
-        # The easiest way is to use a dedicated list in __init__ to store step outputs
-        # OR use self.validation_step_outputs if you manually manage it (recommended).
-        
-        preds = torch.cat([x['pred'] for x in self.validation_step_outputs])
-        targets = torch.cat([x['target'] for x in self.validation_step_outputs])
-        
-        # Convert to numpy
-        preds_np = preds.numpy().flatten()   
-        targets_np = targets.numpy().flatten()
-        errors = preds_np - targets_np
-        abs_errors = np.abs(errors)
+        if self.trainer.is_global_zero:
+            try:
+                # Set matplotlib to non-interactive backend to avoid GUI issues
+                import matplotlib
+                matplotlib.use('Agg')
+                import matplotlib.pyplot as plt
+                import seaborn as sns
+                import pandas as pd
+                
+                # Check if we have validation outputs
+                if not self.validation_step_outputs:
+                    return
+                    
+                # 1. Collect all outputs
+                preds = torch.cat([x['pred'] for x in self.validation_step_outputs])
+                targets = torch.cat([x['target'] for x in self.validation_step_outputs])
+                
+                # Convert to numpy
+                preds_np = preds.numpy().flatten()   
+                targets_np = targets.numpy().flatten()
+                errors = preds_np - targets_np
+                abs_errors = np.abs(errors)
 
-        # --- ANALYSIS 1: Regression Plot ---
-        fig1, ax1 = plt.subplots(figsize=(6, 6))
-        ax1.scatter(targets_np, preds_np, alpha=0.3)
-        ax1.plot([targets_np.min(), targets_np.max()], [targets_np.min(), targets_np.max()], 'r--')
-        ax1.set_xlabel("True RR")
-        ax1.set_ylabel("Predicted RR")
-        ax1.set_title(f"Epoch {self.current_epoch}: Regression Plot")
-        
-        # --- ANALYSIS 2: Bland-Altman Plot ---
-        fig2, ax2 = plt.subplots(figsize=(8, 4))
-        means = (targets_np + preds_np) / 2
-        diffs = preds_np - targets_np
-        mean_diff = np.mean(diffs)
-        std_diff = np.std(diffs)
-        
-        ax2.scatter(means, diffs, alpha=0.3)
-        ax2.axhline(mean_diff, color='red', linestyle='--', label=f'Mean Bias: {mean_diff:.2f}')
-        ax2.axhline(mean_diff + 1.96*std_diff, color='gray', linestyle='--') # +95% limits
-        ax2.axhline(mean_diff - 1.96*std_diff, color='gray', linestyle='--') # -95% limits
-        ax2.set_xlabel("Mean of (Pred + True)")
-        ax2.set_ylabel("Difference (Pred - True)")
-        ax2.set_title("Bland-Altman Plot")
-        ax2.legend()
+                # --- ANALYSIS 1: Regression Plot ---
+                fig1, ax1 = plt.subplots(figsize=(6, 6))
+                ax1.scatter(targets_np, preds_np, alpha=0.3)
+                ax1.plot([targets_np.min(), targets_np.max()], [targets_np.min(), targets_np.max()], 'r--')
+                ax1.set_xlabel("True RR")
+                ax1.set_ylabel("Predicted RR")
+                ax1.set_title(f"Epoch {self.current_epoch}: Regression Plot")
+                
+                # --- ANALYSIS 2: Bland-Altman Plot ---
+                fig2, ax2 = plt.subplots(figsize=(8, 4))
+                means = (targets_np + preds_np) / 2
+                diffs = preds_np - targets_np
+                mean_diff = np.mean(diffs)
+                std_diff = np.std(diffs)
+                
+                ax2.scatter(means, diffs, alpha=0.3)
+                ax2.axhline(mean_diff, color='red', linestyle='--', label=f'Mean Bias: {mean_diff:.2f}')
+                ax2.axhline(mean_diff + 1.96*std_diff, color='gray', linestyle='--')
+                ax2.axhline(mean_diff - 1.96*std_diff, color='gray', linestyle='--')
+                ax2.set_xlabel("Mean of (Pred + True)")
+                ax2.set_ylabel("Difference (Pred - True)")
+                ax2.set_title("Bland-Altman Plot")
+                ax2.legend()
 
-        # --- ANALYSIS 3: Error by Rate Bin ---
-        # Create dataframe for easy binning
-        df = pd.DataFrame({'target': targets_np, 'abs_error': abs_errors})
-        # Define bins: <10, 10-15, 15-20, 20-25, >25
-        bins = [0, 10, 15, 20, 25, 100]
-        labels = ['<10', '10-15', '15-20', '20-25', '>25']
-        df['binned'] = pd.cut(df['target'], bins=bins, labels=labels)
-        
-        fig3, ax3 = plt.subplots(figsize=(8, 4))
-        sns.barplot(data=df, x='binned', y='abs_error', ax=ax3)
-        ax3.set_title("MAE by Respiratory Rate Zone")
-        
-        # --- LOGGING ---
-        # Assuming you use TensorBoardLogger
-        tensorboard = self.logger.experiment
-        tensorboard.add_figure("Analysis/Regression", fig1, self.current_epoch)
-        tensorboard.add_figure("Analysis/BlandAltman", fig2, self.current_epoch)
-        tensorboard.add_figure("Analysis/ErrorByBin", fig3, self.current_epoch)
-        
-        plt.close(fig1)
-        plt.close(fig2)
-        plt.close(fig3)
-        
-        # Clear the list for next epoch
+                # --- ANALYSIS 3: Error by Rate Bin ---
+                df = pd.DataFrame({'target': targets_np, 'abs_error': abs_errors})
+                bins = [0, 10, 15, 20, 25, 100]
+                labels = ['<10', '10-15', '15-20', '20-25', '>25']
+                df['binned'] = pd.cut(df['target'], bins=bins, labels=labels)
+                
+                fig3, ax3 = plt.subplots(figsize=(8, 4))
+                sns.barplot(data=df, x='binned', y='abs_error', ax=ax3)
+                ax3.set_title("MAE by Respiratory Rate Zone")
+                
+                # --- LOGGING ---
+                if hasattr(self.logger, 'experiment'):
+                    try:
+                        tensorboard = self.logger.experiment
+                        tensorboard.add_figure("Analysis/Regression", fig1, self.current_epoch)
+                        tensorboard.add_figure("Analysis/BlandAltman", fig2, self.current_epoch)
+                        tensorboard.add_figure("Analysis/ErrorByBin", fig3, self.current_epoch)
+                    except Exception as e:
+                        print(f"Warning: Could not log figures to tensorboard: {e}")
+                
+                # CRITICAL: Close all figures to prevent memory leaks
+                plt.close(fig1)
+                plt.close(fig2)
+                plt.close(fig3)
+                plt.close('all')  # Extra safety
+                
+            except Exception as e:
+                print(f"Warning: Error creating validation plots: {e}")
+                # Try to close any open figures
+                try:
+                    plt.close('all')
+                except:
+                    pass
+    
+        # Clear the list for next epoch (do this regardless of rank)
         self.validation_step_outputs.clear()
+
     # def on_validation_epoch_end(self):
     #     if not self.validation_step_outputs:
     #         return

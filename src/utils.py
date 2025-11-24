@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')  # Set non-interactive backend
 import matplotlib.pyplot as plt
 import logging
 import numpy as np
@@ -144,49 +146,52 @@ def edpa_denoiser(ppg_signal, fs, bandpass_freqs = [0.5,12.0], threshold_multipl
 
     peaks_win = peaks[(peaks >= start_idx) & (peaks < end_idx)]
     throughs_win = throughs[(throughs >= start_idx) & (throughs < end_idx)]
+    try:
+        plt.figure(figsize=(14, 8))
 
-    plt.figure(figsize=(14, 8))
+        # Raw + filtered
+        plt.subplot(3,1,1)
+        plt.plot(t_win, raw_win, label="Raw PPG", alpha=0.6)
+        plt.plot(t_win, filt_win, label="Filtered", linewidth=1.5)
+        plt.scatter(peaks_win/fs, filtered_signal[peaks_win], color="red", marker="x", label="Peaks")
+        plt.scatter(throughs_win/fs, filtered_signal[throughs_win], color="blue", marker="o", label="Troughs")
+        plt.legend()
+        plt.title(f"PPG Signal ({plot_seconds}s window)")
 
-    # Raw + filtered
-    plt.subplot(3,1,1)
-    plt.plot(t_win, raw_win, label="Raw PPG", alpha=0.6)
-    plt.plot(t_win, filt_win, label="Filtered", linewidth=1.5)
-    plt.scatter(peaks_win/fs, filtered_signal[peaks_win], color="red", marker="x", label="Peaks")
-    plt.scatter(throughs_win/fs, filtered_signal[throughs_win], color="blue", marker="o", label="Troughs")
-    plt.legend()
-    plt.title(f"PPG Signal ({plot_seconds}s window)")
+        # Envelopes + anomaly thresholds
+        plt.subplot(3,1,2)
+        plt.plot(t_win, upper_win, label="Upper Envelope", color="red")
+        plt.plot(t_win, lower_win, label="Lower Envelope", color="blue")
+        plt.plot(t_win, diff_win, label="Envelope Diff", color="purple", alpha=0.7)
+        plt.axhline(median_win, color="gray", linestyle="--", label="Median Diff")
+        plt.axhline(upper_thresh, color="green", linestyle="--", label="Upper Threshold")
+        plt.axhline(lower_thresh, color="orange", linestyle="--", label="Lower Threshold")
+        plt.legend()
+        plt.title("Envelopes and Anomaly Thresholds")
 
-    # Envelopes + anomaly thresholds
-    plt.subplot(3,1,2)
-    plt.plot(t_win, upper_win, label="Upper Envelope", color="red")
-    plt.plot(t_win, lower_win, label="Lower Envelope", color="blue")
-    plt.plot(t_win, diff_win, label="Envelope Diff", color="purple", alpha=0.7)
-    plt.axhline(median_win, color="gray", linestyle="--", label="Median Diff")
-    plt.axhline(upper_thresh, color="green", linestyle="--", label="Upper Threshold")
-    plt.axhline(lower_thresh, color="orange", linestyle="--", label="Lower Threshold")
-    plt.legend()
-    plt.title("Envelopes and Anomaly Thresholds")
+        # Anomalous segments with refinement visualization
+        plt.subplot(3,1,3)
+        plt.plot(t_win, raw_win, label="Raw PPG", alpha=0.5)
 
-    # Anomalous segments with refinement visualization
-    plt.subplot(3,1,3)
-    plt.plot(t_win, raw_win, label="Raw PPG", alpha=0.5)
+        # Plot refined segments (before merge) in orange
+        raw_anomaly_segments = [(group[0], group[-1]) for group in anomaly_groups if len(group) > 0]
+        for start, end in raw_anomaly_segments:
+            if start < end_idx and end > start_idx:
+                plt.axvspan(max(start,start_idx)/fs, min(end,end_idx)/fs, color="blue", alpha=0.6, label="Raw Segment" if 'Raw Segment' not in plt.gca().get_legend_handles_labels()[1] else "")
 
-    # Plot refined segments (before merge) in orange
-    raw_anomaly_segments = [(group[0], group[-1]) for group in anomaly_groups if len(group) > 0]
-    for start, end in raw_anomaly_segments:
-        if start < end_idx and end > start_idx:
-            plt.axvspan(max(start,start_idx)/fs, min(end,end_idx)/fs, color="blue", alpha=0.6, label="Raw Segment" if 'Raw Segment' not in plt.gca().get_legend_handles_labels()[1] else "")
+        # Plot final merged segments in red
+        for start, end in anomalous_segments:
+            if start < end_idx and end > start_idx:
+                plt.axvspan(max(start,start_idx)/fs, min(end,end_idx)/fs, color="red", alpha=0.3, label="Anomalous Segment" if 'Anomalous Segment' not in plt.gca().get_legend_handles_labels()[1] else "")
 
-    # Plot final merged segments in red
-    for start, end in anomalous_segments:
-        if start < end_idx and end > start_idx:
-            plt.axvspan(max(start,start_idx)/fs, min(end,end_idx)/fs, color="red", alpha=0.3, label="Anomalous Segment" if 'Anomalous Segment' not in plt.gca().get_legend_handles_labels()[1] else "")
-
-    plt.legend()
-    plt.title("Detected Anomalous Segments")
-    plt.tight_layout()
-    plt.show()
-
+        plt.legend()
+        plt.title("Detected Anomalous Segments")
+        plt.tight_layout()
+        plt.show()
+        plt.close('all')  # Clean up
+    except Exception as e:
+        print(f"Warning: Could not create EDPA plots: {e}")
+        
     return ppg_signal[keep_mask], merged_segments
 
 def expand_removals_to_second_blocks(removed_segments, fs):
