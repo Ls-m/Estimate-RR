@@ -1343,44 +1343,16 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
 
-        # logger.info(f"compute frequency segments with gpu")
-        # freq_segments = compute_freq_features_gpu(
-        #     ppg_segments, 
-        #     fs=original_rate, 
-        #     device=device
-        # )
+        logger.info(f"compute frequency segments with gpu")
+        freq_segments = compute_freq_features_gpu(
+            ppg_segments, 
+            fs=original_rate, 
+            device=device
+        )
 
-        # processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
+        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
         # logger.info(f"processed data is {processed_data}")
-        # 1. Compute CPU version (for 1 segment)
-        n_jobs = max(1, cpu_count() - 6)
-        logger.info(f"Compute frequency segments for subject {subject_id} using cpu")
-        cpu_seg = generate_cwt_scalogram(ppg_segments[3], fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8)
-        # 2. Compute GPU version
-        device2 = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-        print(f"device is {device2}")
-        gpu_batch = compute_freq_features_gpu(ppg_segments[3:4], fs=125, device=device2)
-        gpu_seg = gpu_batch[0]
-
-        # 3. Compare Visuals
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-
-        # CPU Plot
-        ax[0].imshow(cpu_seg, aspect='auto', origin='lower', cmap='viridis')
-        ax[0].set_title(f"CPU (PyWt)\nMax: {cpu_seg.max():.2f}, Min: {cpu_seg.min():.2f}")
-
-        # GPU Plot
-        ax[1].imshow(gpu_seg, aspect='auto', origin='lower', cmap='viridis')
-        ax[1].set_title(f"GPU (PyTorch)\nMax: {gpu_seg.max():.2f}, Min: {gpu_seg.min():.2f}")
-
-        plt.tight_layout()
-
-        # --- CHANGE IS HERE ---
-        plt.savefig("cwt_comparison.png") 
-        print("Debug plot saved to 'cwt_comparison.png'. Please open it to verify.")
-        # ----------------------
-        exit()
+        
     return processed_data
 
 
