@@ -2066,12 +2066,187 @@ def analyze_fold_distribution(cv_splits, processed_data):
     print(f"{'='*70}\n")
 
 
-
+def analyze_fold_distribution_after_augmentation(fold_id, fold_data):
+    """
+    Analyze distribution after augmentation and balancing.
+    
+    Args:
+        fold_id: Current fold number
+        fold_data: Dictionary returned from create_data_splits with augmented data
+    """
+    from scipy.stats import ks_2samp
+    import numpy as np
+    
+    print("\n" + "="*70)
+    print(f"FOLD {fold_id} - POST-AUGMENTATION ANALYSIS")
+    print("="*70)
+    
+    # Extract data
+    train_rr = np.array(fold_data['train_rr'])
+    val_rr = np.array(fold_data['val_rr'])
+    test_rr = np.array(fold_data['test_rr'])
+    
+    # Compute mean RR for each segment
+    train_rr_means = np.array([np.mean(segment) for segment in train_rr])
+    val_rr_means = np.array([np.mean(segment) for segment in val_rr])
+    test_rr_means = np.array([np.mean(segment) for segment in test_rr])
+    
+    print(f"\n{'─'*70}")
+    print(f"SEGMENT COUNTS (After Augmentation):")
+    print(f"{'─'*70}")
+    print(f"  Train: {len(train_rr):5d} segments")
+    print(f"  Val:   {len(val_rr):5d} segments")
+    print(f"  Test:  {len(test_rr):5d} segments")
+    
+    print(f"\n{'─'*70}")
+    print(f"RESPIRATORY RATE STATISTICS:")
+    print(f"{'─'*70}")
+    print(f"  Train: {train_rr_means.mean():5.2f} ± {train_rr_means.std():4.2f}  "
+          f"(range: {train_rr_means.min():5.2f} - {train_rr_means.max():5.2f})")
+    print(f"  Val:   {val_rr_means.mean():5.2f} ± {val_rr_means.std():4.2f}  "
+          f"(range: {val_rr_means.min():5.2f} - {val_rr_means.max():5.2f})")
+    print(f"  Test:  {test_rr_means.mean():5.2f} ± {test_rr_means.std():4.2f}  "
+          f"(range: {test_rr_means.min():5.2f} - {test_rr_means.max():5.2f})")
+    
+    # KS Tests
+    stat_train_test, pval_train_test = ks_2samp(train_rr_means, test_rr_means)
+    stat_val_test, pval_val_test = ks_2samp(val_rr_means, test_rr_means)
+    
+    print(f"\n{'─'*70}")
+    print(f"DISTRIBUTION SIMILARITY (KS Test):")
+    print(f"{'─'*70}")
+    print(f"  Train vs Test: stat={stat_train_test:.4f}, p-value={pval_train_test:.4f}", end="")
+    if pval_train_test < 0.05:
+        print(" ⚠️  SHIFT DETECTED")
+    else:
+        print(" ✓ Similar")
+    
+    print(f"  Val vs Test:   stat={stat_val_test:.4f}, p-value={pval_val_test:.4f}", end="")
+    if pval_val_test < 0.05:
+        print(" ⚠️  SHIFT DETECTED")
+    else:
+        print(" ✓ Similar")
+    
+    # Class Distribution
+    bins = [0, 10, 15, 20, 25, 100]
+    train_counts = np.histogram(train_rr_means, bins=bins)[0]
+    val_counts = np.histogram(val_rr_means, bins=bins)[0]
+    test_counts = np.histogram(test_rr_means, bins=bins)[0]
+    
+    print(f"\n{'─'*70}")
+    print(f"CLASS DISTRIBUTION BY RR RANGE:")
+    print(f"{'─'*70}")
+    print(f"  Range:  {'<10':>7} {'10-15':>7} {'15-20':>7} {'20-25':>7} {'>25':>7}  {'Total':>7}")
+    print(f"  Train:  {train_counts[0]:7d} {train_counts[1]:7d} {train_counts[2]:7d} "
+          f"{train_counts[3]:7d} {train_counts[4]:7d}  {len(train_rr):7d}")
+    print(f"  Val:    {val_counts[0]:7d} {val_counts[1]:7d} {val_counts[2]:7d} "
+          f"{val_counts[3]:7d} {val_counts[4]:7d}  {len(val_rr):7d}")
+    print(f"  Test:   {test_counts[0]:7d} {test_counts[1]:7d} {test_counts[2]:7d} "
+          f"{test_counts[3]:7d} {test_counts[4]:7d}  {len(test_rr):7d}")
+    
+    # Percentage distribution
+    train_pct = (train_counts / len(train_rr) * 100)
+    val_pct = (val_counts / len(val_rr) * 100) if len(val_rr) > 0 else np.zeros(5)
+    test_pct = (test_counts / len(test_rr) * 100) if len(test_rr) > 0 else np.zeros(5)
+    
+    print(f"\n{'─'*70}")
+    print(f"PERCENTAGE DISTRIBUTION:")
+    print(f"{'─'*70}")
+    print(f"  Train:  {train_pct[0]:6.2f}% {train_pct[1]:6.2f}% {train_pct[2]:6.2f}% "
+          f"{train_pct[3]:6.2f}% {train_pct[4]:6.2f}%")
+    print(f"  Val:    {val_pct[0]:6.2f}% {val_pct[1]:6.2f}% {val_pct[2]:6.2f}% "
+          f"{val_pct[3]:6.2f}% {val_pct[4]:6.2f}%")
+    print(f"  Test:   {test_pct[0]:6.2f}% {test_pct[1]:6.2f}% {test_pct[2]:6.2f}% "
+          f"{test_pct[3]:6.2f}% {test_pct[4]:6.2f}%")
+    
+    # Class Balance Metrics
+    print(f"\n{'─'*70}")
+    print(f"CLASS BALANCE ANALYSIS:")
+    print(f"{'─'*70}")
+    
+    # Calculate imbalance ratio
+    max_class = train_counts.max()
+    min_class = train_counts[train_counts > 0].min() if np.any(train_counts > 0) else 1
+    imbalance_ratio = max_class / min_class
+    
+    print(f"  Train Imbalance Ratio: {imbalance_ratio:.2f}:1")
+    print(f"    Largest class: {max_class} samples")
+    print(f"    Smallest class: {min_class} samples")
+    
+    # Check if classes are balanced (within 20% of each other)
+    target_count = len(train_rr) / 5  # Ideal balanced count
+    balance_threshold = 0.3  # 30% tolerance
+    
+    is_balanced = True
+    for i, (count, label) in enumerate(zip(train_counts, ['<10', '10-15', '15-20', '20-25', '>25'])):
+        deviation = abs(count - target_count) / target_count if target_count > 0 else 0
+        status = "✓" if deviation < balance_threshold else "⚠️"
+        print(f"  {label:>6}: {count:5d} samples ({count/len(train_rr)*100:5.2f}%) "
+              f"- Deviation: {deviation*100:5.1f}% {status}")
+        if deviation >= balance_threshold:
+            is_balanced = False
+    
+    if is_balanced:
+        print(f"\n  ✓ Training set is well-balanced!")
+    else:
+        print(f"\n  ⚠️  Training set still has class imbalance")
+    
+    # Rare class analysis
+    train_rare_pct = (train_counts[0] + train_counts[4]) / len(train_rr) * 100
+    test_rare_pct = (test_counts[0] + test_counts[4]) / len(test_rr) * 100
+    
+    print(f"\n{'─'*70}")
+    print(f"RARE CLASS COVERAGE (<10 or >25 BPM):")
+    print(f"{'─'*70}")
+    print(f"  Train: {train_counts[0] + train_counts[4]:5d} samples ({train_rare_pct:5.2f}%)")
+    print(f"  Test:  {test_counts[0] + test_counts[4]:5d} samples ({test_rare_pct:5.2f}%)")
+    
+    rare_coverage_ratio = (train_rare_pct / test_rare_pct) if test_rare_pct > 0 else 0
+    print(f"  Coverage Ratio: {rare_coverage_ratio:.2f}x")
+    
+    if rare_coverage_ratio < 0.5:
+        print(f"  ⚠️  WARNING: Training has {1/rare_coverage_ratio:.1f}x less rare samples than test!")
+        print(f"     → Model may struggle with rare cases in test set")
+    elif rare_coverage_ratio > 2.0:
+        print(f"  ✓ Good: Training has {rare_coverage_ratio:.1f}x more rare samples")
+    else:
+        print(f"  ✓ Reasonable rare class representation")
+    
+    # Augmentation effectiveness check
+    print(f"\n{'─'*70}")
+    print(f"AUGMENTATION EFFECTIVENESS:")
+    print(f"{'─'*70}")
+    
+    # Compare variance before/after (if you store original counts)
+    # This would require tracking original pre-augmentation counts
+    # For now, we can infer effectiveness from balance
+    
+    expected_max_if_balanced = len(train_rr) / 5 * 1.2  # Allow 20% variation
+    if max_class > expected_max_if_balanced:
+        print(f"  Status: Augmentation may not be aggressive enough")
+        print(f"  Suggestion: Increase augmentation for underrepresented classes")
+    else:
+        print(f"  Status: ✓ Augmentation appears effective")
+    
+    # Subject-level information
+    print(f"\n{'─'*70}")
+    print(f"SUBJECT INFORMATION:")
+    print(f"{'─'*70}")
+    print(f"  Train subjects: {len(fold_data['train_subjects'])}")
+    print(f"  Val subjects:   {len(fold_data['val_subjects'])}")
+    print(f"  Test subjects:  {len(fold_data['test_subjects'])}")
+    print(f"  Avg segments per subject:")
+    print(f"    Train: {len(train_rr) / len(fold_data['train_subjects']):.1f}")
+    print(f"    Val:   {len(val_rr) / len(fold_data['val_subjects']):.1f}")
+    print(f"    Test:  {len(test_rr) / len(fold_data['test_subjects']):.1f}")
+    
+    print("="*70 + "\n")
+    
 
 def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
     analyze_fold_distribution(cv_splits, processed_data)
-    exit()
+    
     all_fold_results = []
     for cv_split in cv_splits:
 
@@ -2079,6 +2254,9 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         logger.info(f"--- Starting Fold {fold_id} ---")
 
         fold_data = create_data_splits(cv_split, processed_data)
+        logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
+        analyze_fold_distribution_after_augmentation(fold_id, fold_data)
+        continue
         train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
         augment=cfg.training.use_augmentation)
         val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
