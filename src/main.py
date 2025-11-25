@@ -1859,7 +1859,13 @@ class SSLDataModule(pl.LightningDataModule):
         )
     
 def analyze_fold_distribution(cv_splits, processed_data):
-    """Check for distribution shift between folds"""
+    """
+    Check for distribution shift between folds.
+    
+    Args:
+        cv_splits: List of fold dictionaries with 'fold_id', 'train_idx', 'val_idx', 'test_idx'
+        processed_data: Dictionary with structure {subject_id: (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)}
+    """
     from scipy.stats import ks_2samp
     import numpy as np
     
@@ -1867,8 +1873,12 @@ def analyze_fold_distribution(cv_splits, processed_data):
     print("FOLD DISTRIBUTION ANALYSIS")
     print("="*70)
     
-    # Extract all RR labels from processed_data
-    all_rr_labels = processed_data['rr_labels']  # Adjust key name if different
+    # 1. Flatten all RR segments from all subjects into a single list
+    all_rr_segments = []
+    for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items():
+        all_rr_segments.extend(rr_segments)  # Concatenate all segments
+    
+    all_rr_segments = np.array(all_rr_segments)
     
     fold_stats = []
     
@@ -1881,9 +1891,10 @@ def analyze_fold_distribution(cv_splits, processed_data):
         test_idx = cv_split["test_idx"]
         
         # Extract RR values and compute means for each segment
-        train_rr = np.array([np.mean(all_rr_labels[i]) for i in train_idx])
-        val_rr = np.array([np.mean(all_rr_labels[i]) for i in val_idx])
-        test_rr = np.array([np.mean(all_rr_labels[i]) for i in test_idx])
+        # Each rr_segment is shape (60,) so we take the mean
+        train_rr = np.array([np.mean(all_rr_segments[i]) for i in train_idx])
+        val_rr = np.array([np.mean(all_rr_segments[i]) for i in val_idx])
+        test_rr = np.array([np.mean(all_rr_segments[i]) for i in test_idx])
         
         print(f"\n{'─'*70}")
         print(f"Fold {fold_id}:")
@@ -1899,7 +1910,7 @@ def analyze_fold_distribution(cv_splits, processed_data):
         # KS test: Train vs Test
         stat_train_test, pval_train_test = ks_2samp(train_rr, test_rr)
         
-        # KS test: Val vs Test (to check if validation is representative)
+        # KS test: Val vs Test
         stat_val_test, pval_val_test = ks_2samp(val_rr, test_rr)
         
         print(f"\n  Distribution Similarity (KS Test):")
@@ -1929,17 +1940,36 @@ def analyze_fold_distribution(cv_splits, processed_data):
         print(f"    Val:    {val_counts[0]:6d} {val_counts[1]:6d} {val_counts[2]:6d} {val_counts[3]:6d} {val_counts[4]:6d}")
         print(f"    Test:   {test_counts[0]:6d} {test_counts[1]:6d} {test_counts[2]:6d} {test_counts[3]:6d} {test_counts[4]:6d}")
         
+        # Calculate percentage distribution for train/test
+        train_pct = (train_counts / len(train_idx) * 100).round(1)
+        test_pct = (test_counts / len(test_idx) * 100).round(1)
+        
+        print(f"\n  Percentage Distribution:")
+        print(f"    Train:  {train_pct[0]:5.1f}% {train_pct[1]:5.1f}% {train_pct[2]:5.1f}% {train_pct[3]:5.1f}% {train_pct[4]:5.1f}%")
+        print(f"    Test:   {test_pct[0]:5.1f}% {test_pct[1]:5.1f}% {test_pct[2]:5.1f}% {test_pct[3]:5.1f}% {test_pct[4]:5.1f}%")
+        
         # Calculate percentage of rare classes in test set
         rare_percentage = (test_counts[0] + test_counts[4]) / len(test_idx) * 100
         print(f"\n  Rare Class Percentage in Test (<10 or >25): {rare_percentage:.1f}%")
+        
+        # Calculate variance in RR within each segment
+        train_rr_variance = np.array([np.std(all_rr_segments[i]) for i in train_idx])
+        test_rr_variance = np.array([np.std(all_rr_segments[i]) for i in test_idx])
+        
+        print(f"\n  Within-Segment RR Variability:")
+        print(f"    Train avg std: {train_rr_variance.mean():.2f}")
+        print(f"    Test avg std:  {test_rr_variance.mean():.2f}")
         
         # Store stats for summary
         fold_stats.append({
             'fold_id': fold_id,
             'train_mean': train_rr.mean(),
+            'train_std': train_rr.std(),
             'test_mean': test_rr.mean(),
+            'test_std': test_rr.std(),
             'ks_pval': pval_train_test,
-            'rare_pct': rare_percentage
+            'rare_pct': rare_percentage,
+            'test_class_counts': test_counts
         })
     
     # Summary across all folds
@@ -1947,12 +1977,14 @@ def analyze_fold_distribution(cv_splits, processed_data):
     print("SUMMARY ACROSS ALL FOLDS")
     print(f"{'='*70}")
     
+    # Check for distribution shift
     problem_folds = [s for s in fold_stats if s['ks_pval'] < 0.05]
     if problem_folds:
         print(f"\n⚠️  WARNING: {len(problem_folds)} fold(s) with significant distribution shift:")
         for s in problem_folds:
             print(f"    Fold {s['fold_id']}: p={s['ks_pval']:.4f}, "
-                  f"Train mean={s['train_mean']:.2f}, Test mean={s['test_mean']:.2f}")
+                  f"Train: {s['train_mean']:.2f}±{s['train_std']:.2f}, "
+                  f"Test: {s['test_mean']:.2f}±{s['test_std']:.2f}")
         print("\n    → These folds may have higher error rates!")
     else:
         print("\n✓ All folds have similar train/test distributions")
@@ -1963,6 +1995,16 @@ def analyze_fold_distribution(cv_splits, processed_data):
         print(f"\nℹ️  Note: {len(high_rare_folds)} fold(s) have >5% rare classes in test set:")
         for s in high_rare_folds:
             print(f"    Fold {s['fold_id']}: {s['rare_pct']:.1f}% rare classes")
+            print(f"      Distribution: <10:{s['test_class_counts'][0]}, "
+                  f">25:{s['test_class_counts'][4]}")
+    
+    # Calculate overall statistics
+    all_train_means = [s['train_mean'] for s in fold_stats]
+    all_test_means = [s['test_mean'] for s in fold_stats]
+    
+    print(f"\n  Average RR across folds:")
+    print(f"    Train: {np.mean(all_train_means):.2f} ± {np.std(all_train_means):.2f}")
+    print(f"    Test:  {np.mean(all_test_means):.2f} ± {np.std(all_test_means):.2f}")
     
     print(f"{'='*70}\n")
 
