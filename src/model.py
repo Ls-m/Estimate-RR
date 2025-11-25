@@ -765,6 +765,53 @@ class FreqSSLPretrainModule(pl.LightningModule):
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-3)
 
+
+
+class SequenceAwareRRLoss(nn.Module):
+    """
+    Loss that considers both point-wise accuracy AND temporal smoothness.
+    """
+    def __init__(self, alpha=1.0, beta=0.1, gamma=0.05):
+        super().__init__()
+        self.alpha = alpha  # Point-wise MAE weight
+        self.beta = beta    # Temporal smoothness weight
+        self.gamma = gamma  # Range-aware weight
+    
+    def forward(self, pred, target):
+        """
+        Args:
+            pred: (B, 60) predicted RR sequence
+            target: (B, 60) target RR sequence
+        """
+        # 1. Point-wise MAE (primary objective)
+        mae = torch.abs(pred - target).mean()
+        
+        # 2. Temporal Smoothness Loss
+        # Penalize unrealistic jumps in RR predictions
+        # Real RR doesn't change by 10 BPM in 1 second!
+        pred_diff = torch.abs(pred[:, 1:] - pred[:, :-1])  # (B, 59)
+        target_diff = torch.abs(target[:, 1:] - target[:, :-1])  # (B, 59)
+        
+        # Penalize predictions that have larger jumps than target
+        smoothness_loss = F.relu(pred_diff - target_diff - 0.5).mean()
+        # The -0.5 gives a small tolerance for natural variation
+        
+        # 3. Range-Aware Weighting
+        # Higher weight for rare RR ranges
+        target_mean = target.mean(dim=1)  # (B,)
+        weights = torch.ones_like(target_mean)
+        
+        rare_mask = (target_mean < 10) | (target_mean > 25)
+        weights[rare_mask] = 2.0
+        
+        # Apply weights to MAE
+        weighted_mae = (torch.abs(pred - target).mean(dim=1) * weights).mean()
+        
+        # 4. Combined Loss
+        total_loss = self.alpha * weighted_mae + \
+                     self.beta * smoothness_loss
+        
+        return total_loss
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
@@ -908,6 +955,8 @@ class RRLightningModule(pl.LightningModule):
             self.criterion = nn.L1Loss()
         elif cfg.training.criterion == "Huber":
             self.criterion = nn.HuberLoss(delta=1.0)
+        elif cfg.training.criterion == "SequenceAware":
+            self.criterion = SequenceAwareRRLoss()
         else:
             raise ValueError(f"Unsupported criterion: {cfg.training.criterion}")
         
