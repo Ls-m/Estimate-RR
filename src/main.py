@@ -1863,7 +1863,7 @@ def analyze_fold_distribution(cv_splits, processed_data):
     Check for distribution shift between folds.
     
     Args:
-        cv_splits: List of fold dictionaries with 'fold_id', 'train_idx', 'val_idx', 'test_idx'
+        cv_splits: List of fold dictionaries with 'fold_id', 'train_subjects', 'val_subjects', 'test_subjects'
         processed_data: Dictionary with structure {subject_id: (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)}
     """
     from scipy.stats import ks_2samp
@@ -1873,34 +1873,57 @@ def analyze_fold_distribution(cv_splits, processed_data):
     print("FOLD DISTRIBUTION ANALYSIS")
     print("="*70)
     
-    # 1. Flatten all RR segments from all subjects into a single list
-    all_rr_segments = []
-    for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items():
-        all_rr_segments.extend(rr_segments)  # Concatenate all segments
-    
-    all_rr_segments = np.array(all_rr_segments)
-    
     fold_stats = []
     
     for cv_split in cv_splits:
         fold_id = cv_split["fold_id"]
         
-        # Get indices for this fold
-        train_idx = cv_split["train_idx"]
-        val_idx = cv_split["val_idx"]
-        test_idx = cv_split["test_idx"]
+        # Get subject IDs for this fold
+        train_subjects = cv_split["train_subjects"]
+        val_subjects = cv_split["val_subjects"]
+        test_subjects = cv_split["test_subjects"]
         
-        # Extract RR values and compute means for each segment
-        # Each rr_segment is shape (60,) so we take the mean
-        train_rr = np.array([np.mean(all_rr_segments[i]) for i in train_idx])
-        val_rr = np.array([np.mean(all_rr_segments[i]) for i in val_idx])
-        test_rr = np.array([np.mean(all_rr_segments[i]) for i in test_idx])
+        # Collect all RR segments for each split
+        train_rr_segments = []
+        val_rr_segments = []
+        test_rr_segments = []
+        
+        for subject_id in train_subjects:
+            if subject_id in processed_data:
+                _, rr_segments, _, _ = processed_data[subject_id]
+                train_rr_segments.extend(rr_segments)
+        
+        for subject_id in val_subjects:
+            if subject_id in processed_data:
+                _, rr_segments, _, _ = processed_data[subject_id]
+                val_rr_segments.extend(rr_segments)
+        
+        for subject_id in test_subjects:
+            if subject_id in processed_data:
+                _, rr_segments, _, _ = processed_data[subject_id]
+                test_rr_segments.extend(rr_segments)
+        
+        # Convert to numpy arrays and compute mean RR for each segment
+        train_rr_segments = np.array(train_rr_segments)
+        val_rr_segments = np.array(val_rr_segments)
+        test_rr_segments = np.array(test_rr_segments)
+        
+        # Compute mean RR for each 60-second segment
+        train_rr = np.array([np.mean(segment) for segment in train_rr_segments])
+        val_rr = np.array([np.mean(segment) for segment in val_rr_segments])
+        test_rr = np.array([np.mean(segment) for segment in test_rr_segments])
         
         print(f"\n{'─'*70}")
         print(f"Fold {fold_id}:")
         print(f"{'─'*70}")
-        print(f"  Sample Counts:")
-        print(f"    Train: {len(train_idx):5d} | Val: {len(val_idx):5d} | Test: {len(test_idx):5d}")
+        
+        # Subject-level counts
+        print(f"  Subject Counts:")
+        print(f"    Train: {len(train_subjects):3d} subjects | Val: {len(val_subjects):3d} subjects | Test: {len(test_subjects):3d} subjects")
+        
+        # Segment-level counts
+        print(f"  Segment Counts:")
+        print(f"    Train: {len(train_rr):5d} segments | Val: {len(val_rr):5d} segments | Test: {len(test_rr):5d} segments")
         
         print(f"\n  Respiratory Rate Statistics (mean ± std):")
         print(f"    Train: {train_rr.mean():5.2f} ± {train_rr.std():4.2f}  (range: {train_rr.min():5.2f} - {train_rr.max():5.2f})")
@@ -1941,35 +1964,64 @@ def analyze_fold_distribution(cv_splits, processed_data):
         print(f"    Test:   {test_counts[0]:6d} {test_counts[1]:6d} {test_counts[2]:6d} {test_counts[3]:6d} {test_counts[4]:6d}")
         
         # Calculate percentage distribution for train/test
-        train_pct = (train_counts / len(train_idx) * 100).round(1)
-        test_pct = (test_counts / len(test_idx) * 100).round(1)
+        train_pct = (train_counts / len(train_rr) * 100) if len(train_rr) > 0 else np.zeros(5)
+        test_pct = (test_counts / len(test_rr) * 100) if len(test_rr) > 0 else np.zeros(5)
         
         print(f"\n  Percentage Distribution:")
         print(f"    Train:  {train_pct[0]:5.1f}% {train_pct[1]:5.1f}% {train_pct[2]:5.1f}% {train_pct[3]:5.1f}% {train_pct[4]:5.1f}%")
         print(f"    Test:   {test_pct[0]:5.1f}% {test_pct[1]:5.1f}% {test_pct[2]:5.1f}% {test_pct[3]:5.1f}% {test_pct[4]:5.1f}%")
         
         # Calculate percentage of rare classes in test set
-        rare_percentage = (test_counts[0] + test_counts[4]) / len(test_idx) * 100
+        rare_percentage = (test_counts[0] + test_counts[4]) / len(test_rr) * 100 if len(test_rr) > 0 else 0
         print(f"\n  Rare Class Percentage in Test (<10 or >25): {rare_percentage:.1f}%")
         
         # Calculate variance in RR within each segment
-        train_rr_variance = np.array([np.std(all_rr_segments[i]) for i in train_idx])
-        test_rr_variance = np.array([np.std(all_rr_segments[i]) for i in test_idx])
+        train_rr_variance = np.array([np.std(segment) for segment in train_rr_segments])
+        test_rr_variance = np.array([np.std(segment) for segment in test_rr_segments])
         
-        print(f"\n  Within-Segment RR Variability:")
+        print(f"\n  Within-Segment RR Variability (how much RR changes within 60s):")
         print(f"    Train avg std: {train_rr_variance.mean():.2f}")
         print(f"    Test avg std:  {test_rr_variance.mean():.2f}")
+        
+        # Per-subject analysis
+        print(f"\n  Per-Subject RR Analysis:")
+        train_subject_means = []
+        test_subject_means = []
+        
+        for subject_id in train_subjects:
+            if subject_id in processed_data:
+                _, rr_segs, _, _ = processed_data[subject_id]
+                subject_mean = np.mean([np.mean(seg) for seg in rr_segs])
+                train_subject_means.append(subject_mean)
+        
+        for subject_id in test_subjects:
+            if subject_id in processed_data:
+                _, rr_segs, _, _ = processed_data[subject_id]
+                subject_mean = np.mean([np.mean(seg) for seg in rr_segs])
+                test_subject_means.append(subject_mean)
+        
+        train_subject_means = np.array(train_subject_means)
+        test_subject_means = np.array(test_subject_means)
+        
+        print(f"    Train subject-level mean: {train_subject_means.mean():.2f} ± {train_subject_means.std():.2f}")
+        print(f"    Test subject-level mean:  {test_subject_means.mean():.2f} ± {test_subject_means.std():.2f}")
         
         # Store stats for summary
         fold_stats.append({
             'fold_id': fold_id,
+            'train_subjects': len(train_subjects),
+            'test_subjects': len(test_subjects),
+            'train_segments': len(train_rr),
+            'test_segments': len(test_rr),
             'train_mean': train_rr.mean(),
             'train_std': train_rr.std(),
             'test_mean': test_rr.mean(),
             'test_std': test_rr.std(),
             'ks_pval': pval_train_test,
             'rare_pct': rare_percentage,
-            'test_class_counts': test_counts
+            'test_class_counts': test_counts,
+            'train_subject_mean': train_subject_means.mean(),
+            'test_subject_mean': test_subject_means.mean(),
         })
     
     # Summary across all folds
@@ -1982,9 +2034,9 @@ def analyze_fold_distribution(cv_splits, processed_data):
     if problem_folds:
         print(f"\n⚠️  WARNING: {len(problem_folds)} fold(s) with significant distribution shift:")
         for s in problem_folds:
-            print(f"    Fold {s['fold_id']}: p={s['ks_pval']:.4f}, "
-                  f"Train: {s['train_mean']:.2f}±{s['train_std']:.2f}, "
-                  f"Test: {s['test_mean']:.2f}±{s['test_std']:.2f}")
+            print(f"    Fold {s['fold_id']}: p={s['ks_pval']:.4f}")
+            print(f"      Train: {s['train_mean']:.2f}±{s['train_std']:.2f} ({s['train_subjects']} subjects, {s['train_segments']} segments)")
+            print(f"      Test:  {s['test_mean']:.2f}±{s['test_std']:.2f} ({s['test_subjects']} subjects, {s['test_segments']} segments)")
         print("\n    → These folds may have higher error rates!")
     else:
         print("\n✓ All folds have similar train/test distributions")
@@ -2001,12 +2053,20 @@ def analyze_fold_distribution(cv_splits, processed_data):
     # Calculate overall statistics
     all_train_means = [s['train_mean'] for s in fold_stats]
     all_test_means = [s['test_mean'] for s in fold_stats]
+    all_test_segments = [s['test_segments'] for s in fold_stats]
     
     print(f"\n  Average RR across folds:")
     print(f"    Train: {np.mean(all_train_means):.2f} ± {np.std(all_train_means):.2f}")
     print(f"    Test:  {np.mean(all_test_means):.2f} ± {np.std(all_test_means):.2f}")
     
+    print(f"\n  Segment count variation across folds:")
+    print(f"    Test segments: {np.mean(all_test_segments):.0f} ± {np.std(all_test_segments):.0f}")
+    print(f"    Range: {min(all_test_segments)} - {max(all_test_segments)}")
+    
     print(f"{'='*70}\n")
+
+
+
 
 def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
