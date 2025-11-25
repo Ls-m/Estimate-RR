@@ -1,5 +1,6 @@
 import torch.nn.functional as F
 import os
+import scipy
 import pandas as pd
 import numpy as np
 import hydra
@@ -827,7 +828,38 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
     psd_band = psd_band / (np.sum(psd_band) + 1e-12)
 
     return psd_band.astype(np.float32)
-
+def respiratory_aware_augmentation(ppg):
+    """Augment while preserving respiratory characteristics"""
+    aug_type = np.random.choice(['time_stretch', 'noise', 'baseline_wander'])
+    
+    if aug_type == 'time_stretch':
+        # Small time stretching preserves frequency relationships
+        stretch_factor = np.random.uniform(0.95, 1.05)
+        ppg_aug = scipy.ndimage.zoom(ppg, stretch_factor)
+        # Adjust length back to original
+        if len(ppg_aug) > len(ppg):
+            ppg_aug = ppg_aug[:len(ppg)]
+        else:
+            ppg_aug = np.pad(ppg_aug, (0, len(ppg) - len(ppg_aug)), mode='edge')
+        return ppg_aug
+    
+    elif aug_type == 'noise':
+        # Physiologically realistic noise
+        snr_db = np.random.uniform(15, 25)  # Realistic SNR range
+        signal_power = np.var(ppg)
+        noise_power = signal_power / (10 ** (snr_db / 10))
+        noise = np.random.normal(0, np.sqrt(noise_power), len(ppg))
+        return ppg + noise
+    
+    elif aug_type == 'baseline_wander':
+        # Respiratory-correlated baseline (0.1-0.5 Hz)
+        t = np.linspace(0, len(ppg)/125, len(ppg))  # Assuming 125Hz
+        freq = np.random.uniform(0.1, 0.5)
+        amplitude = np.std(ppg) * np.random.uniform(0.05, 0.15)
+        wander = amplitude * np.sin(2 * np.pi * freq * t)
+        return ppg + wander
+    
+    return ppg
 def augment_ppg_segment(ppg):
     # 1. Ensure Numpy
     ppg = np.array(ppg, dtype=np.float32)
@@ -969,7 +1001,8 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
             src_rr = rr_list[source_idx]
             
             # Only augment PPG and Label
-            aug_ppg = augment_ppg_segment(src_ppg)
+            # aug_ppg = augment_ppg_segment(src_ppg)
+            aug_ppg = respiratory_aware_augmentation(src_ppg)
             aug_rr = copy.deepcopy(src_rr)
             
             new_ppg_raw.append(aug_ppg)
@@ -2271,7 +2304,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fold_data = create_data_splits(cv_split, processed_data)
         logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
         analyze_fold_distribution_after_augmentation(fold_id, fold_data)
-        continue
+        
         train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
         augment=cfg.training.use_augmentation)
         val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
