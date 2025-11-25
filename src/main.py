@@ -2293,7 +2293,7 @@ def analyze_fold_distribution_after_augmentation(fold_id, fold_data):
 
 def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
-    analyze_fold_distribution(cv_splits, processed_data)
+    # analyze_fold_distribution(cv_splits, processed_data)
     
     all_fold_results = []
     for cv_split in cv_splits:
@@ -2302,8 +2302,8 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         logger.info(f"--- Starting Fold {fold_id} ---")
 
         fold_data = create_data_splits(cv_split, processed_data)
-        logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
-        analyze_fold_distribution_after_augmentation(fold_id, fold_data)
+        # logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
+        # analyze_fold_distribution_after_augmentation(fold_id, fold_data)
         
         train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
         augment=cfg.training.use_augmentation)
