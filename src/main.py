@@ -2167,13 +2167,13 @@ def analyze_fold_distribution_after_augmentation(fold_id, fold_data):
     # Calculate imbalance ratio
     max_class = train_counts.max()
     min_class = train_counts[train_counts > 0].min() if np.any(train_counts > 0) else 1
-    imbalance_ratio = max_class / min_class
+    imbalance_ratio = max_class / min_class if min_class > 0 else float('inf')
     
     print(f"  Train Imbalance Ratio: {imbalance_ratio:.2f}:1")
     print(f"    Largest class: {max_class} samples")
     print(f"    Smallest class: {min_class} samples")
     
-    # Check if classes are balanced (within 20% of each other)
+    # Check if classes are balanced (within 30% of each other)
     target_count = len(train_rr) / 5  # Ideal balanced count
     balance_threshold = 0.3  # 30% tolerance
     
@@ -2191,39 +2191,50 @@ def analyze_fold_distribution_after_augmentation(fold_id, fold_data):
     else:
         print(f"\n  ⚠️  Training set still has class imbalance")
     
-    # Rare class analysis
-    train_rare_pct = (train_counts[0] + train_counts[4]) / len(train_rr) * 100
-    test_rare_pct = (test_counts[0] + test_counts[4]) / len(test_rr) * 100
+    # Rare class analysis (FIXED: Handle zero division)
+    train_rare_count = train_counts[0] + train_counts[4]
+    test_rare_count = test_counts[0] + test_counts[4]
+    
+    train_rare_pct = (train_rare_count / len(train_rr) * 100) if len(train_rr) > 0 else 0
+    test_rare_pct = (test_rare_count / len(test_rr) * 100) if len(test_rr) > 0 else 0
     
     print(f"\n{'─'*70}")
     print(f"RARE CLASS COVERAGE (<10 or >25 BPM):")
     print(f"{'─'*70}")
-    print(f"  Train: {train_counts[0] + train_counts[4]:5d} samples ({train_rare_pct:5.2f}%)")
-    print(f"  Test:  {test_counts[0] + test_counts[4]:5d} samples ({test_rare_pct:5.2f}%)")
+    print(f"  Train: {train_rare_count:5d} samples ({train_rare_pct:5.2f}%)")
+    print(f"  Test:  {test_rare_count:5d} samples ({test_rare_pct:5.2f}%)")
     
-    rare_coverage_ratio = (train_rare_pct / test_rare_pct) if test_rare_pct > 0 else 0
-    print(f"  Coverage Ratio: {rare_coverage_ratio:.2f}x")
-    
-    if rare_coverage_ratio < 0.5:
-        print(f"  ⚠️  WARNING: Training has {1/rare_coverage_ratio:.1f}x less rare samples than test!")
-        print(f"     → Model may struggle with rare cases in test set")
-    elif rare_coverage_ratio > 2.0:
-        print(f"  ✓ Good: Training has {rare_coverage_ratio:.1f}x more rare samples")
+    # FIXED: Handle all edge cases for rare_coverage_ratio
+    if test_rare_pct == 0 and train_rare_pct == 0:
+        print(f"  ℹ️  No rare classes in either train or test set")
+        rare_coverage_ratio = 1.0  # Neutral value
+    elif test_rare_pct == 0:
+        print(f"  ℹ️  No rare classes in test set (train has {train_rare_pct:.2f}%)")
+        rare_coverage_ratio = float('inf')
+    elif train_rare_pct == 0:
+        print(f"  ⚠️  WARNING: No rare classes in training but test has {test_rare_pct:.2f}%!")
+        print(f"     → Model will NOT learn to predict rare cases!")
+        rare_coverage_ratio = 0.0
     else:
-        print(f"  ✓ Reasonable rare class representation")
+        rare_coverage_ratio = train_rare_pct / test_rare_pct
+        print(f"  Coverage Ratio: {rare_coverage_ratio:.2f}x")
+        
+        if rare_coverage_ratio < 0.5:
+            print(f"  ⚠️  WARNING: Training has {test_rare_pct/train_rare_pct:.1f}x LESS rare samples than test!")
+            print(f"     → Model may struggle with rare cases in test set")
+        elif rare_coverage_ratio > 2.0:
+            print(f"  ✓ Good: Training has {rare_coverage_ratio:.1f}x MORE rare samples than test")
+        else:
+            print(f"  ✓ Reasonable rare class representation")
     
     # Augmentation effectiveness check
     print(f"\n{'─'*70}")
     print(f"AUGMENTATION EFFECTIVENESS:")
     print(f"{'─'*70}")
     
-    # Compare variance before/after (if you store original counts)
-    # This would require tracking original pre-augmentation counts
-    # For now, we can infer effectiveness from balance
-    
     expected_max_if_balanced = len(train_rr) / 5 * 1.2  # Allow 20% variation
     if max_class > expected_max_if_balanced:
-        print(f"  Status: Augmentation may not be aggressive enough")
+        print(f"  Status: ⚠️  Augmentation may not be aggressive enough")
         print(f"  Suggestion: Increase augmentation for underrepresented classes")
     else:
         print(f"  Status: ✓ Augmentation appears effective")
@@ -2235,10 +2246,14 @@ def analyze_fold_distribution_after_augmentation(fold_id, fold_data):
     print(f"  Train subjects: {len(fold_data['train_subjects'])}")
     print(f"  Val subjects:   {len(fold_data['val_subjects'])}")
     print(f"  Test subjects:  {len(fold_data['test_subjects'])}")
-    print(f"  Avg segments per subject:")
-    print(f"    Train: {len(train_rr) / len(fold_data['train_subjects']):.1f}")
-    print(f"    Val:   {len(val_rr) / len(fold_data['val_subjects']):.1f}")
-    print(f"    Test:  {len(test_rr) / len(fold_data['test_subjects']):.1f}")
+    
+    if len(fold_data['train_subjects']) > 0:
+        print(f"  Avg segments per subject:")
+        print(f"    Train: {len(train_rr) / len(fold_data['train_subjects']):.1f}")
+        if len(fold_data['val_subjects']) > 0:
+            print(f"    Val:   {len(val_rr) / len(fold_data['val_subjects']):.1f}")
+        if len(fold_data['test_subjects']) > 0:
+            print(f"    Test:  {len(test_rr) / len(fold_data['test_subjects']):.1f}")
     
     print("="*70 + "\n")
     
