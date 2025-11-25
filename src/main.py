@@ -1,4 +1,4 @@
-
+import torch.nn.functional as F
 import os
 import pandas as pd
 import numpy as np
@@ -1185,48 +1185,50 @@ def denoise_ppg_with_wavelet(ppg_signal, wavelet='sym8', level=5):
 
     return denoised_signal
 
+
 def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda'):
-    """
-    Computes CWT scalograms for a list of segments using PyTorch on GPU.
-    """
     if not ppg_segments:
         return np.array([])
 
-    # 1. Initialize CWT Model
-    # Ensure parameters match your config (fmax=0.8, num_scales=128)
     cwt_model = PyTorchCWT(fs=fs, num_scales=128, fmin=0.1, fmax=0.8).to(device)
     cwt_model.eval()
 
-    # 2. Prepare Data Tensor
-    # Stack list of 1D arrays into a 2D tensor (N, 7500)
-    # We assume all segments have the same length (e.g., 60s * 125Hz = 7500)
-    try:
-        input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
-    except ValueError:
-        # Handle edge case where segments might have different lengths (e.g., end of signal)
-        # If so, you might need to pad them or process individually. 
-        # For now, assuming consistent windowing:
-        print("Error: Segments have mismatching lengths. Falling back to CPU or check segmentation.")
-        return np.array([])
-
-    input_tensor = input_tensor.to(device)
+    # Input Z-Score
+    input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
+    mu = input_tensor.mean(dim=1, keepdim=True)
+    std = input_tensor.std(dim=1, keepdim=True)
+    input_tensor = (input_tensor - mu) / torch.clamp(std, min=0.001)
     
+    input_tensor = input_tensor.to(device)
     all_scalograms = []
 
-    # 3. Run in Batches (to avoid OOM on GPU)
     with torch.no_grad():
         for i in range(0, len(input_tensor), batch_size):
             batch = input_tensor[i : i + batch_size]
             
-            # Forward pass (returns B, 128, 60)
-            # We use target_time=60 to match your Seq2Seq model
-            scalograms = cwt_model(batch, target_time=60)
+            # Raw CWT
+            raw_scalograms = cwt_model(batch, target_time=60) 
             
-            # Move to CPU and numpy
+            # --- Quantile Normalization ---
+            # This handles outliers gracefully and maximizes contrast
+            
+            # Flatten to find quantiles per image
+            B_curr = raw_scalograms.shape[0]
+            flat = raw_scalograms.view(B_curr, -1)
+            
+            # Use 2% and 98% as the black/white points
+            q_min = torch.quantile(flat, 0.02, dim=1, keepdim=True).unsqueeze(-1)
+            q_max = torch.quantile(flat, 0.98, dim=1, keepdim=True).unsqueeze(-1)
+            
+            # Scale
+            scalograms = (raw_scalograms - q_min) / (q_max - q_min + 1e-8)
+            scalograms = torch.clamp(scalograms, 0.0, 1.0)
+            
             all_scalograms.append(scalograms.cpu().numpy())
 
-    # 4. Concatenate into one array (N, 128, 60)
     return np.concatenate(all_scalograms, axis=0)
+
+
 
 def process_data(cfg, raw_data, dataset_name='bidmc'):
     # Code to process data goes here
@@ -1341,30 +1343,43 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
 
-        logger.info(f"compute frequency segments with gpu")
-        freq_segments = compute_freq_features_gpu(
-            ppg_segments, 
-            fs=original_rate, 
-            device=device
-        )
+        # logger.info(f"compute frequency segments with gpu")
+        # freq_segments = compute_freq_features_gpu(
+        #     ppg_segments, 
+        #     fs=original_rate, 
+        #     device=device
+        # )
 
-        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
+        # processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
         # logger.info(f"processed data is {processed_data}")
         # 1. Compute CPU version (for 1 segment)
-        cpu_seg = generate_cwt_scalogram(ppg_segments[0], fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8)
-
+        n_jobs = max(1, cpu_count() - 6)
+        logger.info(f"Compute frequency segments for subject {subject_id} using cpu")
+        cpu_seg = generate_cwt_scalogram(ppg_segments[3], fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8)
         # 2. Compute GPU version
-        gpu_batch = compute_freq_features_gpu(ppg_segments[0:1], fs=125)
+        device2 = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        print(f"device is {device2}")
+        gpu_batch = compute_freq_features_gpu(ppg_segments[3:4], fs=125, device=device2)
         gpu_seg = gpu_batch[0]
 
         # 3. Compare Visuals
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+
+        # CPU Plot
         ax[0].imshow(cpu_seg, aspect='auto', origin='lower', cmap='viridis')
-        ax[0].set_title("CPU (PyWt)")
+        ax[0].set_title(f"CPU (PyWt)\nMax: {cpu_seg.max():.2f}, Min: {cpu_seg.min():.2f}")
+
+        # GPU Plot
         ax[1].imshow(gpu_seg, aspect='auto', origin='lower', cmap='viridis')
-        ax[1].set_title("GPU (PyTorch)")
-        plt.show()
+        ax[1].set_title(f"GPU (PyTorch)\nMax: {gpu_seg.max():.2f}, Min: {gpu_seg.min():.2f}")
+
+        plt.tight_layout()
+
+        # --- CHANGE IS HERE ---
+        plt.savefig("cwt_comparison.png") 
+        print("Debug plot saved to 'cwt_comparison.png'. Please open it to verify.")
+        # ----------------------
         exit()
     return processed_data
 
