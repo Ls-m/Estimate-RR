@@ -1857,8 +1857,119 @@ class SSLDataModule(pl.LightningDataModule):
             persistent_workers=True,
             prefetch_factor=4
         )
+    
+def analyze_fold_distribution(cv_splits, processed_data):
+    """Check for distribution shift between folds"""
+    from scipy.stats import ks_2samp
+    import numpy as np
+    
+    print("\n" + "="*70)
+    print("FOLD DISTRIBUTION ANALYSIS")
+    print("="*70)
+    
+    # Extract all RR labels from processed_data
+    all_rr_labels = processed_data['rr_labels']  # Adjust key name if different
+    
+    fold_stats = []
+    
+    for cv_split in cv_splits:
+        fold_id = cv_split["fold_id"]
+        
+        # Get indices for this fold
+        train_idx = cv_split["train_idx"]
+        val_idx = cv_split["val_idx"]
+        test_idx = cv_split["test_idx"]
+        
+        # Extract RR values and compute means for each segment
+        train_rr = np.array([np.mean(all_rr_labels[i]) for i in train_idx])
+        val_rr = np.array([np.mean(all_rr_labels[i]) for i in val_idx])
+        test_rr = np.array([np.mean(all_rr_labels[i]) for i in test_idx])
+        
+        print(f"\n{'─'*70}")
+        print(f"Fold {fold_id}:")
+        print(f"{'─'*70}")
+        print(f"  Sample Counts:")
+        print(f"    Train: {len(train_idx):5d} | Val: {len(val_idx):5d} | Test: {len(test_idx):5d}")
+        
+        print(f"\n  Respiratory Rate Statistics (mean ± std):")
+        print(f"    Train: {train_rr.mean():5.2f} ± {train_rr.std():4.2f}  (range: {train_rr.min():5.2f} - {train_rr.max():5.2f})")
+        print(f"    Val:   {val_rr.mean():5.2f} ± {val_rr.std():4.2f}  (range: {val_rr.min():5.2f} - {val_rr.max():5.2f})")
+        print(f"    Test:  {test_rr.mean():5.2f} ± {test_rr.std():4.2f}  (range: {test_rr.min():5.2f} - {test_rr.max():5.2f})")
+        
+        # KS test: Train vs Test
+        stat_train_test, pval_train_test = ks_2samp(train_rr, test_rr)
+        
+        # KS test: Val vs Test (to check if validation is representative)
+        stat_val_test, pval_val_test = ks_2samp(val_rr, test_rr)
+        
+        print(f"\n  Distribution Similarity (KS Test):")
+        print(f"    Train vs Test: stat={stat_train_test:.4f}, p-value={pval_train_test:.4f}", end="")
+        if pval_train_test < 0.05:
+            print(" ⚠️  SIGNIFICANT SHIFT!")
+        else:
+            print(" ✓")
+        
+        print(f"    Val vs Test:   stat={stat_val_test:.4f}, p-value={pval_val_test:.4f}", end="")
+        if pval_val_test < 0.05:
+            print(" ⚠️  SIGNIFICANT SHIFT!")
+        else:
+            print(" ✓")
+        
+        # Class distribution analysis
+        bins = [0, 10, 15, 20, 25, 100]
+        labels = ['<10', '10-15', '15-20', '20-25', '>25']
+        
+        train_counts = np.histogram(train_rr, bins=bins)[0]
+        val_counts = np.histogram(val_rr, bins=bins)[0]
+        test_counts = np.histogram(test_rr, bins=bins)[0]
+        
+        print(f"\n  Class Distribution by RR Range:")
+        print(f"    Range:  {'<10':>6} {'10-15':>6} {'15-20':>6} {'20-25':>6} {'>25':>6}")
+        print(f"    Train:  {train_counts[0]:6d} {train_counts[1]:6d} {train_counts[2]:6d} {train_counts[3]:6d} {train_counts[4]:6d}")
+        print(f"    Val:    {val_counts[0]:6d} {val_counts[1]:6d} {val_counts[2]:6d} {val_counts[3]:6d} {val_counts[4]:6d}")
+        print(f"    Test:   {test_counts[0]:6d} {test_counts[1]:6d} {test_counts[2]:6d} {test_counts[3]:6d} {test_counts[4]:6d}")
+        
+        # Calculate percentage of rare classes in test set
+        rare_percentage = (test_counts[0] + test_counts[4]) / len(test_idx) * 100
+        print(f"\n  Rare Class Percentage in Test (<10 or >25): {rare_percentage:.1f}%")
+        
+        # Store stats for summary
+        fold_stats.append({
+            'fold_id': fold_id,
+            'train_mean': train_rr.mean(),
+            'test_mean': test_rr.mean(),
+            'ks_pval': pval_train_test,
+            'rare_pct': rare_percentage
+        })
+    
+    # Summary across all folds
+    print(f"\n{'='*70}")
+    print("SUMMARY ACROSS ALL FOLDS")
+    print(f"{'='*70}")
+    
+    problem_folds = [s for s in fold_stats if s['ks_pval'] < 0.05]
+    if problem_folds:
+        print(f"\n⚠️  WARNING: {len(problem_folds)} fold(s) with significant distribution shift:")
+        for s in problem_folds:
+            print(f"    Fold {s['fold_id']}: p={s['ks_pval']:.4f}, "
+                  f"Train mean={s['train_mean']:.2f}, Test mean={s['test_mean']:.2f}")
+        print("\n    → These folds may have higher error rates!")
+    else:
+        print("\n✓ All folds have similar train/test distributions")
+    
+    # Check for folds with high rare class percentage
+    high_rare_folds = [s for s in fold_stats if s['rare_pct'] > 5]
+    if high_rare_folds:
+        print(f"\nℹ️  Note: {len(high_rare_folds)} fold(s) have >5% rare classes in test set:")
+        for s in high_rare_folds:
+            print(f"    Fold {s['fold_id']}: {s['rare_pct']:.1f}% rare classes")
+    
+    print(f"{'='*70}\n")
+
 def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
+    analyze_fold_distribution(cv_splits, processed_data)
+    exit()
     all_fold_results = []
     for cv_split in cv_splits:
 
