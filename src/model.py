@@ -18,6 +18,7 @@ from typing import Tuple, Optional
 import torchmetrics
 import numpy as np
 from transformer import CNNTransformerRegressor
+from tcn import TCNScalogramModel
 import seaborn as sns
 import pandas as pd
 from rwkv_freq import RWKVScalogramModel
@@ -921,12 +922,13 @@ class RRLightningModule(pl.LightningModule):
             #     num_layers=2,        # Depth of the model
             #     dropout=cfg.training.dropout
             # )
-            self.freq_model = CNNTransformerRegressor(
-                hidden_size=256,
-                num_layers=4,
-                nhead=4,
-                dropout=cfg.training.dropout
-            )
+            # self.freq_model = CNNTransformerRegressor(
+            #     hidden_size=256,
+            #     num_layers=4,
+            #     nhead=4,
+            #     dropout=cfg.training.dropout
+            # )
+            self.freq_model = TCNScalogramModel()
             # self.freq_model = AdvancedScalogramEncoder(
             #     image_size=(64, 64), # Make sure this matches your generated images
             #     output_features=self.cfg.freq_model_output_dim # The output vector size
