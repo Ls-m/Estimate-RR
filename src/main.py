@@ -1016,7 +1016,7 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
             
             # Only augment PPG and Label
             # aug_ppg = augment_ppg_segment(src_ppg)
-            aug_ppg, aug_rr = respiratory_aware_augmentation(src_ppg)
+            aug_ppg, aug_rr = respiratory_aware_augmentation(src_ppg, src_rr)
             # aug_rr = copy.deepcopy(src_rr)
             
             new_ppg_raw.append(aug_ppg)
