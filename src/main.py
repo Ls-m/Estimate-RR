@@ -38,6 +38,7 @@ from dataset import FrequencySSLDataset
 import copy
 from torch.utils.data import Dataset
 from cwt_generator import PyTorchCWT
+from augmenter import *
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -956,6 +957,101 @@ def process_cwt_on_gpu(ppg_list, device='cuda'):
     return list(final_array) # List of (128, 60) arrays
 
 
+
+def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, freq_list):
+    """
+    Balanced dataset generation with SCALOGRAM augmentation.
+    
+    CRITICAL FIX:
+    1. CWT scalograms are computed FIRST
+    2. Scalograms are augmented directly (not PPG)
+    3. RR labels remain unchanged and valid
+    """
+    print("--- Starting Dataset Balancing (Scalogram-based) ---")
+    
+    # Ensure inputs are lists
+    if isinstance(ppg_list, np.ndarray): ppg_list = list(ppg_list)
+    if isinstance(rr_list, np.ndarray): rr_list = list(rr_list)
+    if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
+
+    # 1. Organize Indices by RR Class (same as before)
+    class_indices = {0: [], 1: [], 2: [], 3: [], 4: []}
+    
+    for i, rr in enumerate(rr_list):
+        mean_rr = np.mean(rr)
+        if mean_rr < 10: bin_idx = 0
+        elif 10 <= mean_rr < 15: bin_idx = 1
+        elif 15 <= mean_rr < 20: bin_idx = 2
+        elif 20 <= mean_rr < 25: bin_idx = 3
+        else: bin_idx = 4
+        class_indices[bin_idx].append(i)
+
+    # 2. Find Majority Count
+    counts = [len(idxs) for idxs in class_indices.values()]
+    target_count = max(counts)
+    print(f"Initial Counts: {counts}")
+    print(f"Target per class: {target_count}")
+    
+    new_freq_aug = []  # <<< AUGMENTED SCALOGRAMS
+    new_rr = []        # <<< LABELS (UNCHANGED)
+    
+    # Initialize augmentor
+    augmentor = ScalogramAugmentor(
+        intensity_range=(0.85, 1.15),
+        contrast_range=(0.80, 1.20),
+        freq_jitter_pct=0.03,
+        time_jitter_pct=0.03,
+        blur_sigma_range=(0.3, 0.8),
+        rotation_range=(-3, 3)
+    )
+    
+    # 3. Generate Augmented Data
+    for bin_idx, indices in class_indices.items():
+        current_count = len(indices)
+        if current_count == 0:
+            continue
+
+        needed = target_count - current_count
+        if needed <= 0:
+            continue
+            
+        print(f"Class {bin_idx}: Generating {needed} samples using {current_count} sources...")
+
+        for k in range(needed):
+            source_idx = indices[k % current_count]
+            
+            # Get ORIGINAL scalogram and label
+            src_freq = freq_list[source_idx]  # Shape: (128, 60)
+            src_rr = rr_list[source_idx]      # Shape: (60,)
+            
+            # AUGMENT THE SCALOGRAM (not the label)
+            aug_freq = augmentor.augment(src_freq)
+            
+            # Label stays the same ✓
+            aug_rr = copy.deepcopy(src_rr)
+            
+            new_freq_aug.append(aug_freq)
+            new_rr.append(aug_rr)
+
+    # 4. Combine Original + Augmented
+    final_freq = freq_list + new_freq_aug
+    final_rr = rr_list + new_rr
+    final_ppg = ppg_list  # PPG is NOT augmented (no need)
+    
+    print(f"Balancing Complete.  Added {len(new_freq_aug)} synthetic samples.")
+    print(f"Final Dataset Size: {len(final_freq)}")
+    
+    # VALIDATION: Check RR distribution is unchanged
+    original_means = np.array([np.mean(rr) for rr in rr_list])
+    augmented_means = np.array([np.mean(rr) for rr in final_rr])
+    
+    print(f"\n--- RR Label Validation ---")
+    print(f"Original RR mean: {original_means.mean():.2f} ± {original_means.std():.2f}")
+    print(f"After augmentation: {augmented_means.mean():.2f} ± {augmented_means.std():.2f}")
+    print(f"✓ Labels preserved (only scalograms augmented)\n")
+    
+    return final_ppg, final_rr, final_freq
+
 def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
     print("--- Starting Dataset Balancing (Parallelized) ---")
     
@@ -1633,7 +1729,10 @@ def create_data_splits(cv_split, processed_data):
 
     # --- STEP 2: BALANCE DATASET ---
     #Now we pass the flattened lists.
-    train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
+    # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
+    #     train_ppg, train_rr, train_freq
+    # )
+    train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis_fixed(
         train_ppg, train_rr, train_freq
     )
     val_ppg = np.concatenate(val_ppg_list, axis=0).tolist()
