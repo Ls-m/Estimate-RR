@@ -831,57 +831,38 @@ def extract_freq_features(ppg_segment, fs, fmin, fmax, nperseg):
 
 
 
-def respiratory_aware_augmentation(ppg, rr_labels):
-    """Augment while preserving respiratory characteristics
-    
-    Args:
-        ppg: 1D list or numpy array of PPG signal
-        rr_labels: list or array of 60 RR values
-    
-    Returns:
-        tuple: (augmented_ppg as list, adjusted_rr_labels as list)
-    """
-    # Convert BOTH inputs to numpy arrays for arithmetic operations
-    ppg_array = np.array(ppg)
-    rr_array = np.array(rr_labels)
-    
-    aug_type = np.random. choice(['time_stretch', 'noise', 'baseline_wander', 'amplitude_scale'])
+def respiratory_aware_augmentation(ppg):
+    """Augment while preserving respiratory characteristics"""
+    aug_type = np.random.choice(['time_stretch', 'noise', 'baseline_wander'])
     
     if aug_type == 'time_stretch':
-        stretch_factor = np. random.uniform(0.95, 1.05)
-        ppg_aug = scipy.ndimage.zoom(ppg_array, stretch_factor)
-        
-        if len(ppg_aug) > len(ppg_array):
-            ppg_aug = ppg_aug[:len(ppg_array)]
+        # Small time stretching preserves frequency relationships
+        stretch_factor = np.random.uniform(0.95, 1.05)
+        ppg_aug = scipy.ndimage.zoom(ppg, stretch_factor)
+        # Adjust length back to original
+        if len(ppg_aug) > len(ppg):
+            ppg_aug = ppg_aug[:len(ppg)]
         else:
-            ppg_aug = np.pad(ppg_aug, (0, len(ppg_array) - len(ppg_aug)), mode='edge')
-        
-        # Adjust RR labels accordingly
-        rr_aug = rr_array / stretch_factor
-        return ppg_aug. tolist(), rr_aug.tolist()
+            ppg_aug = np.pad(ppg_aug, (0, len(ppg) - len(ppg_aug)), mode='edge')
+        return ppg_aug
     
     elif aug_type == 'noise':
-        snr_db = np.random. uniform(20, 30)
-        signal_power = np. var(ppg_array)
+        # Physiologically realistic noise
+        snr_db = np.random.uniform(15, 25)  # Realistic SNR range
+        signal_power = np.var(ppg)
         noise_power = signal_power / (10 ** (snr_db / 10))
-        noise = np.random.normal(0, np.sqrt(noise_power), len(ppg_array))
-        ppg_aug = ppg_array + noise
-        return ppg_aug. tolist(), rr_array.copy(). tolist()
+        noise = np.random.normal(0, np.sqrt(noise_power), len(ppg))
+        return ppg + noise
     
     elif aug_type == 'baseline_wander':
-        t = np. linspace(0, len(ppg_array)/125, len(ppg_array))
-        freq = np.random.uniform(0.01, 0.08)  # Below respiratory band
-        amplitude = np.std(ppg_array) * np.random.uniform(0.05, 0.10)
-        wander = amplitude * np.sin(2 * np. pi * freq * t + np.random. uniform(0, 2*np.pi))
-        ppg_aug = ppg_array + wander
-        return ppg_aug.tolist(), rr_array.copy().tolist()
+        # Respiratory-correlated baseline (0.1-0.5 Hz)
+        t = np.linspace(0, len(ppg)/125, len(ppg))  # Assuming 125Hz
+        freq = np.random.uniform(0.1, 0.5)
+        amplitude = np.std(ppg) * np.random.uniform(0.05, 0.15)
+        wander = amplitude * np.sin(2 * np.pi * freq * t)
+        return ppg + wander
     
-    elif aug_type == 'amplitude_scale':
-        scale = np.random.uniform(0.8, 1.2)
-        ppg_aug = ppg_array * scale
-        return ppg_aug.tolist(), rr_array.copy().tolist()
-    
-    return ppg_array.tolist(), rr_array.copy().tolist()
+    return ppg
 
 def augment_ppg_segment(ppg):
     # 1. Ensure Numpy
@@ -1025,8 +1006,8 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
             
             # Only augment PPG and Label
             # aug_ppg = augment_ppg_segment(src_ppg)
-            aug_ppg, aug_rr = respiratory_aware_augmentation(src_ppg, src_rr)
-            # aug_rr = copy.deepcopy(src_rr)
+            aug_ppg = respiratory_aware_augmentation(src_ppg)
+            aug_rr = copy.deepcopy(src_rr)
             
             new_ppg_raw.append(aug_ppg)
             new_rr.append(aug_rr)
