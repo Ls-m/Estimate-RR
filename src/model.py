@@ -917,18 +917,18 @@ class RRLightningModule(pl.LightningModule):
             #     output_features=self.cfg.freq_model_output_dim,
             #     dropout_rate=cfg.training.dropout
             # )
-            # self.freq_model = RWKVScalogramModel(
-            #     hidden_size=256,     # Internal vector size (try 128 or 256)
-            #     num_layers=2,        # Depth of the model
-            #     dropout=cfg.training.dropout
-            # )
+            self.freq_model = RWKVScalogramModel(
+                hidden_size=256,     # Internal vector size (try 128 or 256)
+                num_layers=2,        # Depth of the model
+                dropout=cfg.training.dropout
+            )
             # self.freq_model = CNNTransformerRegressor(
             #     hidden_size=256,
             #     num_layers=4,
             #     nhead=4,
             #     dropout=cfg.training.dropout
             # )
-            self.freq_model = TCNScalogramModel()
+            # self.freq_model = TCNScalogramModel()
             # self.freq_model = AdvancedScalogramEncoder(
             #     image_size=(64, 64), # Make sure this matches your generated images
             #     output_features=self.cfg.freq_model_output_dim # The output vector size
