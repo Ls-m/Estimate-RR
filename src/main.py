@@ -835,48 +835,53 @@ def respiratory_aware_augmentation(ppg, rr_labels):
     """Augment while preserving respiratory characteristics
     
     Args:
-        ppg: 1D numpy array of PPG signal
+        ppg: 1D list or numpy array of PPG signal
         rr_labels: list or array of 60 RR values
     
     Returns:
-        tuple: (augmented_ppg, adjusted_rr_labels as list)
+        tuple: (augmented_ppg as list, adjusted_rr_labels as list)
     """
-    # Convert to numpy array for arithmetic operations
+    # Convert BOTH inputs to numpy arrays for arithmetic operations
+    ppg_array = np.array(ppg)
     rr_array = np.array(rr_labels)
     
-    aug_type = np.random.choice(['time_stretch', 'noise', 'baseline_wander', 'amplitude_scale'])
+    aug_type = np.random. choice(['time_stretch', 'noise', 'baseline_wander', 'amplitude_scale'])
     
     if aug_type == 'time_stretch':
         stretch_factor = np. random.uniform(0.95, 1.05)
-        ppg_aug = scipy.ndimage.zoom(ppg, stretch_factor)
+        ppg_aug = scipy.ndimage.zoom(ppg_array, stretch_factor)
         
-        if len(ppg_aug) > len(ppg):
-            ppg_aug = ppg_aug[:len(ppg)]
+        if len(ppg_aug) > len(ppg_array):
+            ppg_aug = ppg_aug[:len(ppg_array)]
         else:
-            ppg_aug = np.pad(ppg_aug, (0, len(ppg) - len(ppg_aug)), mode='edge')
+            ppg_aug = np.pad(ppg_aug, (0, len(ppg_array) - len(ppg_aug)), mode='edge')
         
         # Adjust RR labels accordingly
         rr_aug = rr_array / stretch_factor
-        return ppg_aug, rr_aug. tolist()  # Convert back to list if needed
+        return ppg_aug. tolist(), rr_aug.tolist()
     
     elif aug_type == 'noise':
         snr_db = np.random. uniform(20, 30)
-        signal_power = np.var(ppg)
+        signal_power = np. var(ppg_array)
         noise_power = signal_power / (10 ** (snr_db / 10))
-        noise = np.random.normal(0, np.sqrt(noise_power), len(ppg))
-        return ppg + noise, rr_array.copy(). tolist()
+        noise = np.random.normal(0, np.sqrt(noise_power), len(ppg_array))
+        ppg_aug = ppg_array + noise
+        return ppg_aug. tolist(), rr_array.copy(). tolist()
     
     elif aug_type == 'baseline_wander':
-        t = np. linspace(0, len(ppg)/125, len(ppg))
-        freq = np.random. uniform(0.01, 0.08)  # Below respiratory band
-        amplitude = np.std(ppg) * np.random.uniform(0.05, 0.10)
+        t = np. linspace(0, len(ppg_array)/125, len(ppg_array))
+        freq = np.random.uniform(0.01, 0.08)  # Below respiratory band
+        amplitude = np.std(ppg_array) * np.random.uniform(0.05, 0.10)
         wander = amplitude * np.sin(2 * np. pi * freq * t + np.random. uniform(0, 2*np.pi))
-        return ppg + wander, rr_array. copy().tolist()
+        ppg_aug = ppg_array + wander
+        return ppg_aug.tolist(), rr_array.copy().tolist()
     
     elif aug_type == 'amplitude_scale':
         scale = np.random.uniform(0.8, 1.2)
-        return ppg * scale, rr_array.copy().tolist()  
-    return ppg, rr_array.copy().tolist()
+        ppg_aug = ppg_array * scale
+        return ppg_aug.tolist(), rr_array.copy().tolist()
+    
+    return ppg_array.tolist(), rr_array.copy().tolist()
 
 def augment_ppg_segment(ppg):
     # 1. Ensure Numpy
