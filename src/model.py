@@ -918,7 +918,7 @@ class RRLightningModule(pl.LightningModule):
             #     dropout_rate=cfg.training.dropout
             # )
             self.freq_model = RWKVScalogramModel(
-                hidden_size=256,     # Internal vector size (try 128 or 256)
+                hidden_size=512,     # Internal vector size (try 128 or 256)
                 num_layers=2,        # Depth of the model
                 dropout=cfg.training.dropout
             )
