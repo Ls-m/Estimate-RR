@@ -1240,7 +1240,7 @@ def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
     def process_single(segment):
-        return generate_cwt_scalogram(segment, fs, use_fake=False)
+        return generate_cwt_scalogram(segment, fs, use_fake=True)
         # return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
@@ -1511,7 +1511,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
         n_jobs = max(1, cpu_count() - 4)
         # logger.info(f"Compute frequency segments for subject {subject_id}")
-        # freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
+        freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
         # freq_segments = compute_freq_features(ppg_segments, original_rate)
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
@@ -1531,17 +1531,17 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         #     fmax=0.5,  # CHANGED from 0.8
         #     normalization='per_column'  # CHANGED from quantile
         # )
-        logger.info(f"Computing CWT scalograms for subject {subject_id} using PyWavelets...")
-        freq_segments = compute_freq_features_pywt(
-            ppg_segments,
-            fs=original_rate,
-            num_scales=128,
-            fmin=0.1,
-            fmax=0.5,
-            target_time=60,
-            normalization='per_column',
-            n_jobs=n_jobs  # Adjust based on your CPU cores
-        )
+        # logger.info(f"Computing CWT scalograms for subject {subject_id} using PyWavelets...")
+        # freq_segments = compute_freq_features_pywt(
+        #     ppg_segments,
+        #     fs=original_rate,
+        #     num_scales=128,
+        #     fmin=0.1,
+        #     fmax=0.5,
+        #     target_time=60,
+        #     normalization='per_column',
+        #     n_jobs=n_jobs  # Adjust based on your CPU cores
+        # )
 
         processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
         # logger.info(f"processed data is {processed_data}")

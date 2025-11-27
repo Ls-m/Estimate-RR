@@ -844,7 +844,7 @@ class RRLightningModule(pl.LightningModule):
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
-                model = LinearModel(input_size=cfg.training.window_size*125, hidden_size=2048, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                model = LinearModel(input_size=cfg.training.window_size*125, hidden_size=128, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
