@@ -40,6 +40,7 @@ from torch.utils.data import Dataset
 from cwt_generator import PyTorchCWT
 from augmenter import *
 from dataval import *
+from debug import *
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -2742,6 +2743,16 @@ def main(cfg: DictConfig):
     # ============================================================
     # END VALIDATION BLOCK
     # ============================================================
+
+    logger.info("Running deep scalogram diagnosis...")
+        
+    os.makedirs("validation_plots", exist_ok=True)
+    
+    # Run detailed diagnosis on 5 samples
+    diagnosis_results = run_batch_diagnosis(processed_data, n_samples=5)
+    logger.info("Stopping after diagnosis.  Check validation_plots/ folder.")
+
+
     processed_capnobase_ssl = None  # Initialize to None
     if cfg.ssl.use_capnobase:
         logger.info("Loading and processing CapnoBase dataset for SSL pre-training...")
