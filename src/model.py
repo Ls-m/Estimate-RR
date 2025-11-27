@@ -93,8 +93,12 @@ class CNNLinearModel(nn.Module):
             nn.ReLU(),
             nn.Flatten(start_dim=1),
             nn.Linear(623, hidden_size),
+            nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size, output_size)
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size//2, output_size)
         )
 
     def forward(self, x):
