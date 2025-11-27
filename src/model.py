@@ -1267,7 +1267,7 @@ class RRLightningModule(pl.LightningModule):
                 }
             }
         elif self.scheduler == "CosineAnnealingLR":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=70, eta_min=1e-6)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=500, eta_min=1e-6)
             return {
                 'optimizer': optimizer,
                 'lr_scheduler': {
