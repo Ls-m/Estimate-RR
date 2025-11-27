@@ -85,20 +85,20 @@ class CNNLinearModel(nn.Module):
         self.model = nn.Sequential(
             nn.Conv1d(in_channels=1, out_channels=8, kernel_size=127, padding=0, stride=2),
             nn.ReLU(),
-            nn.Conv1d(in_channels=8, out_channels=4, kernel_size=127, padding=0, stride=2),
+            nn.Conv1d(in_channels=8, out_channels=8, kernel_size=127, padding=0, stride=2),
             nn.ReLU(),
             # nn.Conv1d(in_channels=4, out_channels=2, kernel_size=127, padding=0, stride=2),
             # nn.ReLU(),
-            nn.Conv1d(in_channels=4, out_channels=1, kernel_size=127, padding=0, stride=1),
+            nn.Conv1d(in_channels=8, out_channels=4, kernel_size=127, padding=0, stride=1),
             nn.ReLU(),
             nn.Flatten(start_dim=1),
-            nn.Linear(1655, hidden_size),
+            nn.Linear(1655*4, hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size, hidden_size//2),
+            nn.Linear(hidden_size, hidden_size//4),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size//2, output_size)
+            nn.Linear(hidden_size//4, output_size)
         )
 
     def forward(self, x):
@@ -888,7 +888,7 @@ class RRLightningModule(pl.LightningModule):
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
-                model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=128, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
