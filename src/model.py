@@ -105,7 +105,7 @@ class SimpleCNNLinearModel(nn.Module):
             nn.Conv1d(in_channels=1, out_channels=2, kernel_size=11, padding=1, stride=3),
             nn.ReLU(),
             nn.Flatten(start_dim=1),
-            nn.Linear(4994, hidden_size),
+            nn.Linear(4996, hidden_size),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, output_size)
         )
