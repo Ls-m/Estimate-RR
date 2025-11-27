@@ -2827,6 +2827,9 @@ def main(cfg: DictConfig):
 
     logger.info("Running CWT vs other methods comparison...")
     comparison_results = run_comparison(processed_data, n_samples=5)
+
+    print("Testing fixed CWT...")
+    quick_test_fixed_cwt()
     exit()
     processed_capnobase_ssl = None  # Initialize to None
     if cfg.ssl.use_capnobase:
