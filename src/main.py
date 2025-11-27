@@ -41,6 +41,7 @@ from cwt_generator import PyTorchCWT
 from augmenter import *
 from dataval import *
 from debug import *
+from investigate_rr import *
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -2753,6 +2754,9 @@ def main(cfg: DictConfig):
     logger.info("Stopping after diagnosis.  Check validation_plots/ folder.")
 
 
+    logger.info("Investigating RR labels...")
+    label_results = batch_label_investigation(processed_data, n_samples=10)
+    exit()
     processed_capnobase_ssl = None  # Initialize to None
     if cfg.ssl.use_capnobase:
         logger.info("Loading and processing CapnoBase dataset for SSL pre-training...")
