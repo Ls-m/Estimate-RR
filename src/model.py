@@ -85,7 +85,7 @@ class CNNLinearModel(nn.Module):
         self.model = nn.Sequential(
             nn.Conv1d(in_channels=1, out_channels=8, kernel_size=11, padding=1, stride=3),
             nn.ReLU(),
-            nn.Conv1d(in_channels=8, out_channels=4, kernel_size=7, padding=1, stride=3),
+            nn.Conv1d(in_channels=8, out_channels=4, kernel_size=7, padding=1, stride=2),
             nn.ReLU(),
             nn.Conv1d(in_channels=4, out_channels=2, kernel_size=5, padding=1, stride=2),
             nn.ReLU(),
