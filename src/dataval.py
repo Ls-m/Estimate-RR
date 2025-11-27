@@ -114,8 +114,8 @@ def batch_quality_check(scalograms, rr_labels, n_samples=10):
     print("SCALOGRAM QUALITY CHECK (Peak Detection Baseline)")
     print("="*50)
     print(f"Samples checked: {n}")
-    print(f"Mean MAE: {np.mean(all_maes):. 2f} ± {np. std(all_maes):.2f} BPM")
-    print(f"Mean Correlation: {np.mean(all_corrs):.3f} ± {np.std(all_corrs):. 3f}")
+    print(f"Mean MAE: {np.mean(all_maes):.2f} ± {np. std(all_maes):.2f} BPM")
+    print(f"Mean Correlation: {np.mean(all_corrs):.3f} ± {np.std(all_corrs):.3f}")
     print("="*50)
     
     if np.mean(all_maes) > 5:
@@ -129,6 +129,6 @@ def batch_quality_check(scalograms, rr_labels, n_samples=10):
     return {
         'maes': all_maes,
         'correlations': all_corrs,
-        'mean_mae': np. mean(all_maes),
+        'mean_mae': np.mean(all_maes),
         'mean_corr': np.mean(all_corrs)
     }
