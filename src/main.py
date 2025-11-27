@@ -720,7 +720,7 @@ def create_segments_simple(subject_id, ppg_signal, rr_labels, ppg_fs, rr_fs, win
         # ppg_segment_norm = (ppg_segment - np.mean(ppg_segment)) / (np.std(ppg_segment) + 1e-8)
         ppg_segment_norm = normalize_signal(ppg_segment)
         ppg_segments.append(ppg_segment_norm)
-        rr_segments.append(rr_slice)
+        rr_segments.append(rr_slice[-1])
     
     return ppg_segments, rr_segments
 # Place this new function in the same file as your other processing functions
