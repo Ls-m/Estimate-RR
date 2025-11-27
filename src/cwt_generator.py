@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import pywt
-from main import compute_freq_features_gpu
 # class PyTorchCWT(nn.Module):
 #     def __init__(self, fs=125, num_scales=128, fmin=0.1, fmax=0.8, wavelet='morl'):
 #         super().__init__()
@@ -147,75 +146,75 @@ class PyTorchCWT(nn.Module):
         
         return scalogram
     
-# def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda',
-#                                fmin=0.1, fmax=0.5, normalization='per_column'):
-#     """
-#     Compute CWT scalograms on GPU with improved normalization.
+def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda',
+                               fmin=0.1, fmax=0.5, normalization='per_column'):
+    """
+    Compute CWT scalograms on GPU with improved normalization.
     
-#     CHANGES:
-#     1. fmax: 0.8 -> 0. 5 (respiratory only)
-#     2.  normalization: 'per_column' for peak detection, 'quantile' for global patterns
+    CHANGES:
+    1. fmax: 0.8 -> 0. 5 (respiratory only)
+    2.  normalization: 'per_column' for peak detection, 'quantile' for global patterns
     
-#     Args:
-#         ppg_segments: List of 1D PPG arrays
-#         fs: Sampling frequency
-#         batch_size: GPU batch size
-#         device: 'cuda' or 'cpu'
-#         fmin: Minimum frequency (Hz)
-#         fmax: Maximum frequency (Hz) - CHANGED to 0.5
-#         normalization: 'per_column', 'quantile', or 'global'
+    Args:
+        ppg_segments: List of 1D PPG arrays
+        fs: Sampling frequency
+        batch_size: GPU batch size
+        device: 'cuda' or 'cpu'
+        fmin: Minimum frequency (Hz)
+        fmax: Maximum frequency (Hz) - CHANGED to 0.5
+        normalization: 'per_column', 'quantile', or 'global'
     
-#     Returns:
-#         np.ndarray of shape (N, 128, 60)
-#     """
-#     if not ppg_segments:
-#         return np.array([])
+    Returns:
+        np.ndarray of shape (N, 128, 60)
+    """
+    if not ppg_segments:
+        return np.array([])
     
-#     # Initialize model with CORRECT frequency range
-#     cwt_model = PyTorchCWT(
-#         fs=fs, 
-#         num_scales=128, 
-#         fmin=fmin, 
-#         fmax=fmax  # Now 0.5 by default
-#     ).to(device)
-#     cwt_model.eval()
+    # Initialize model with CORRECT frequency range
+    cwt_model = PyTorchCWT(
+        fs=fs, 
+        num_scales=128, 
+        fmin=fmin, 
+        fmax=fmax  # Now 0.5 by default
+    ).to(device)
+    cwt_model.eval()
     
-#     # Input Z-Score normalization
-#     input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
-#     mu = input_tensor.mean(dim=1, keepdim=True)
-#     std = input_tensor.std(dim=1, keepdim=True)
-#     input_tensor = (input_tensor - mu) / torch.clamp(std, min=0.001)
-#     input_tensor = input_tensor.to(device)
+    # Input Z-Score normalization
+    input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
+    mu = input_tensor.mean(dim=1, keepdim=True)
+    std = input_tensor.std(dim=1, keepdim=True)
+    input_tensor = (input_tensor - mu) / torch.clamp(std, min=0.001)
+    input_tensor = input_tensor.to(device)
     
-#     all_scalograms = []
+    all_scalograms = []
     
-#     with torch.no_grad():
-#         for i in range(0, len(input_tensor), batch_size):
-#             batch = input_tensor[i:i + batch_size]
+    with torch.no_grad():
+        for i in range(0, len(input_tensor), batch_size):
+            batch = input_tensor[i:i + batch_size]
             
-#             # Compute raw CWT
-#             raw_scalograms = cwt_model(batch, target_time=60)  # (B, 128, 60)
+            # Compute raw CWT
+            raw_scalograms = cwt_model(batch, target_time=60)  # (B, 128, 60)
             
-#             # Apply normalization based on method
-#             if normalization == 'per_column':
-#                 # Per-column (per-timestep) normalization
-#                 # This is BEST for peak detection at each timestep
-#                 scalograms = normalize_per_column(raw_scalograms)
+            # Apply normalization based on method
+            if normalization == 'per_column':
+                # Per-column (per-timestep) normalization
+                # This is BEST for peak detection at each timestep
+                scalograms = normalize_per_column(raw_scalograms)
                 
-#             elif normalization == 'quantile':
-#                 # Quantile normalization per image (your original method)
-#                 scalograms = normalize_quantile(raw_scalograms)
+            elif normalization == 'quantile':
+                # Quantile normalization per image (your original method)
+                scalograms = normalize_quantile(raw_scalograms)
                 
-#             elif normalization == 'global':
-#                 # Simple min-max per image
-#                 scalograms = normalize_global(raw_scalograms)
+            elif normalization == 'global':
+                # Simple min-max per image
+                scalograms = normalize_global(raw_scalograms)
                 
-#             else:
-#                 raise ValueError(f"Unknown normalization: {normalization}")
+            else:
+                raise ValueError(f"Unknown normalization: {normalization}")
             
-#             all_scalograms.append(scalograms.cpu().numpy())
+            all_scalograms.append(scalograms.cpu().numpy())
     
-#     return np.concatenate(all_scalograms, axis=0)
+    return np.concatenate(all_scalograms, axis=0)
 
 
 def normalize_per_column(scalograms):
