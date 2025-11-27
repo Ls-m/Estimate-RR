@@ -42,7 +42,7 @@ from dataval import *
 from debug import *
 from investigate_rr import *
 from cwt_generator import *
-
+from debug2 import *
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
     if not os.path.exists(path):
@@ -2824,6 +2824,9 @@ def main(cfg: DictConfig):
     
     if validation_results['mean_mae'] > 5.0:
         logger.warning("CWT validation failed!  Check your preprocessing.")
+
+    logger.info("Running CWT vs other methods comparison...")
+    comparison_results = run_comparison(processed_data, n_samples=5)
     exit()
     processed_capnobase_ssl = None  # Initialize to None
     if cfg.ssl.use_capnobase:
