@@ -268,9 +268,9 @@ def run_batch_diagnosis(processed_data, n_samples=5):
     
     print("\nAverage MAE by configuration:")
     for config_name, maes in config_maes.items():
-        print(f"   {config_name}: {np.mean(maes):. 2f} ± {np.std(maes):.2f} BPM")
+        print(f"   {config_name}: {np.mean(maes):.2f} ± {np.std(maes):.2f} BPM")
     
-    best_config = min(config_maes. keys(), key=lambda k: np.mean(config_maes[k]))
+    best_config = min(config_maes.keys(), key=lambda k: np.mean(config_maes[k]))
     print(f"\n   → Best config: {best_config}")
     
     return all_results
