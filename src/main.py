@@ -39,6 +39,7 @@ import copy
 from torch.utils.data import Dataset
 from cwt_generator import PyTorchCWT
 from augmenter import *
+from dataval import *
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -2676,7 +2677,71 @@ def main(cfg: DictConfig):
     # min_len = min(segment_counts.values())
     # logger.info(f"minimum number of segments across subjects: {min_len}")
     
-
+    # ============================================================
+    # NEW: VALIDATE SCALOGRAMS BEFORE TRAINING
+    # ============================================================
+    if cfg.get("validate_scalograms", True):  # Add this flag to config
+        logger.info("=" * 60)
+        logger. info("VALIDATING SCALOGRAM QUALITY")
+        logger.info("=" * 60)
+        
+        # Collect samples from all subjects
+        all_scalograms = []
+        all_rr_labels = []
+        
+        for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items():
+            # freq_segments are your scalograms
+            for i in range(min(5, len(freq_segments))):  # Take up to 5 per subject
+                all_scalograms. append(freq_segments[i])
+                all_rr_labels.append(rr_segments[i])
+        
+        all_scalograms = np.array(all_scalograms)
+        all_rr_labels = np.array(all_rr_labels)
+        
+        logger.info(f"Collected {len(all_scalograms)} scalograms for validation")
+        logger.info(f"Scalogram shape: {all_scalograms[0].shape}")
+        logger.info(f"RR label shape: {all_rr_labels[0].shape}")
+        
+        # Run batch quality check
+        quality_results = batch_quality_check(
+            all_scalograms, 
+            all_rr_labels, 
+            n_samples=50  # Check 50 random samples
+        )
+        
+        # Visualize a few examples
+        os.makedirs("validation_plots", exist_ok=True)
+        
+        for i in range(min(5, len(all_scalograms))):
+            fig, results = visualize_scalogram_with_rr(
+                all_scalograms[i],
+                all_rr_labels[i],
+                fmin=0.1,
+                fmax=0.8,  # Match your CWT config
+                title=f"Sample {i}"
+            )
+            fig.savefig(f"validation_plots/scalogram_sample_{i}.png", dpi=150)
+            plt.close(fig)
+            logger.info(f"Sample {i}: MAE={results['mae']:.2f}, Corr={results['correlation']:.3f}")
+        
+        # Decision point
+        if quality_results['mean_mae'] > 5.0:
+            logger.warning("⚠️ HIGH MAE DETECTED - Scalograms may not contain clear RR info!")
+            logger. warning("Consider checking:")
+            logger.warning("  1. fmin/fmax range in CWT generation")
+            logger. warning("  2.  PPG preprocessing (bandpass filter cutoffs)")
+            logger. warning("  3.  Scalogram normalization")
+            
+            if cfg.get("stop_on_bad_quality", False):
+                raise ValueError("Stopping due to poor scalogram quality.  Set stop_on_bad_quality=False to continue anyway.")
+        
+        logger.info("=" * 60)
+        logger.info("VALIDATION COMPLETE - Proceeding to training")
+        logger. info("=" * 60)
+    
+    # ============================================================
+    # END VALIDATION BLOCK
+    # ============================================================
     processed_capnobase_ssl = None  # Initialize to None
     if cfg.ssl.use_capnobase:
         logger.info("Loading and processing CapnoBase dataset for SSL pre-training...")
