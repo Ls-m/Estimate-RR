@@ -83,12 +83,14 @@ class CNNLinearModel(nn.Module):
           hidden_size=2048, output_size=512, dropout=0):
         super(CNNLinearModel, self).__init__()
         self.model = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=2, kernel_size=11, padding=1, stride=3),
+            nn.Conv1d(in_channels=1, out_channels=1, kernel_size=11, padding=1, stride=3),
             nn.ReLU(),
-            nn.Conv1d(in_channels=2, out_channels=1, kernel_size=5, padding=1, stride=2),
+            nn.Conv1d(in_channels=1, out_channels=1, kernel_size=7, padding=1, stride=2),
+            nn.ReLU(),
+            nn.Conv1d(in_channels=1, out_channels=1, kernel_size=5, padding=1, stride=2),
             nn.ReLU(),
             nn.Flatten(start_dim=1),
-            nn.Linear(1248, hidden_size),
+            nn.Linear(624, hidden_size),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, output_size)
         )
@@ -880,7 +882,7 @@ class RRLightningModule(pl.LightningModule):
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
-                model = SimpleCNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=128, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=128, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
