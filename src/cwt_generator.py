@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import pywt
-
+from main import compute_freq_features_gpu
 # class PyTorchCWT(nn.Module):
 #     def __init__(self, fs=125, num_scales=128, fmin=0.1, fmax=0.8, wavelet='morl'):
 #         super().__init__()
