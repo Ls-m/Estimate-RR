@@ -1323,43 +1323,77 @@ def denoise_ppg_with_wavelet(ppg_signal, wavelet='sym8', level=5):
     return denoised_signal
 
 
-def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda'):
+def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda',
+                               fmin=0.1, fmax=0.5, normalization='per_column'):
+    
     if not ppg_segments:
         return np.array([])
 
-    cwt_model = PyTorchCWT(fs=fs, num_scales=128, fmin=0.1, fmax=0.8).to(device)
+    # Initialize model with the specified frequency range
+    cwt_model = PyTorchCWT(
+        fs=fs, 
+        num_scales=128, 
+        fmin=fmin, 
+        fmax=fmax
+    ).to(device)
     cwt_model.eval()
 
-    # Input Z-Score
+    # Input Z-Score normalization
     input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
     mu = input_tensor.mean(dim=1, keepdim=True)
     std = input_tensor.std(dim=1, keepdim=True)
     input_tensor = (input_tensor - mu) / torch.clamp(std, min=0.001)
-    
     input_tensor = input_tensor.to(device)
+    
     all_scalograms = []
 
     with torch.no_grad():
         for i in range(0, len(input_tensor), batch_size):
-            batch = input_tensor[i : i + batch_size]
+            batch = input_tensor[i:i + batch_size]
             
-            # Raw CWT
-            raw_scalograms = cwt_model(batch, target_time=60) 
+            # Compute raw CWT
+            raw_scalograms = cwt_model(batch, target_time=60)  # (B, 128, 60)
             
-            # --- Quantile Normalization ---
-            # This handles outliers gracefully and maximizes contrast
-            
-            # Flatten to find quantiles per image
-            B_curr = raw_scalograms.shape[0]
-            flat = raw_scalograms.view(B_curr, -1)
-            
-            # Use 2% and 98% as the black/white points
-            q_min = torch.quantile(flat, 0.02, dim=1, keepdim=True).unsqueeze(-1)
-            q_max = torch.quantile(flat, 0.98, dim=1, keepdim=True).unsqueeze(-1)
-            
-            # Scale
-            scalograms = (raw_scalograms - q_min) / (q_max - q_min + 1e-8)
-            scalograms = torch.clamp(scalograms, 0.0, 1.0)
+            # Apply normalization based on method
+            if normalization == 'per_column':
+                # Per-column (per-timestep) normalization
+                # BEST for peak detection at each timestep
+                B, F, T = raw_scalograms.shape
+                
+                # Compute min/max along frequency axis for each timestep
+                col_min = raw_scalograms.min(dim=1, keepdim=True)[0]  # (B, 1, T)
+                col_max = raw_scalograms.max(dim=1, keepdim=True)[0]  # (B, 1, T)
+                
+                # Avoid division by zero
+                col_range = col_max - col_min
+                col_range = torch.clamp(col_range, min=1e-8)
+                
+                # Normalize
+                scalograms = (raw_scalograms - col_min) / col_range
+                
+            elif normalization == 'quantile':
+                # Quantile normalization per image (original method)
+                B_curr = raw_scalograms.shape[0]
+                flat = raw_scalograms.view(B_curr, -1)
+                
+                q_min = torch.quantile(flat, 0.02, dim=1, keepdim=True).unsqueeze(-1)
+                q_max = torch.quantile(flat, 0.98, dim=1, keepdim=True).unsqueeze(-1)
+                
+                scalograms = (raw_scalograms - q_min) / (q_max - q_min + 1e-8)
+                scalograms = torch.clamp(scalograms, 0.0, 1.0)
+                
+            elif normalization == 'global':
+                # Simple min-max per image
+                B_curr = raw_scalograms.shape[0]
+                flat = raw_scalograms.view(B_curr, -1)
+                
+                s_min = flat.min(dim=1, keepdim=True)[0].unsqueeze(-1)
+                s_max = flat.max(dim=1, keepdim=True)[0].unsqueeze(-1)
+                
+                scalograms = (raw_scalograms - s_min) / (s_max - s_min + 1e-8)
+                
+            else:
+                raise ValueError(f"Unknown normalization: {normalization}")
             
             all_scalograms.append(scalograms.cpu().numpy())
 

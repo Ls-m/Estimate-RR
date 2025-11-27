@@ -80,17 +80,9 @@ import pywt
 
 
 class PyTorchCWT(nn.Module):
-    """
-    GPU-accelerated CWT for respiratory rate estimation. 
-    
-    CHANGES:
-    1. fmax reduced to 0.5 Hz (30 BPM) - pure respiratory band
-    2. Added per-column normalization option
-    """
     def __init__(self, fs=125, num_scales=128, fmin=0.1, fmax=0.5, wavelet='morl'):
         super().__init__()
         
-        self.num_scales = num_scales
         self.fmin = fmin
         self.fmax = fmax
         
@@ -100,12 +92,6 @@ class PyTorchCWT(nn.Module):
         scale_min = fc / (fmax * dt)
         scale_max = fc / (fmin * dt)
         scales = np.linspace(scale_min, scale_max, num_scales)
-        
-        # Store frequency axis for later use
-        self.register_buffer(
-            'freqs_bpm',
-            torch.from_numpy(np.linspace(fmin, fmax, num_scales) * 60).float()
-        )
         
         # Kernel size (in samples)
         max_len = int(10 * scale_max)
@@ -123,10 +109,10 @@ class PyTorchCWT(nn.Module):
             wavelet_data = norm * wavelet_data
             wavelet_data = wavelet_data - np.mean(wavelet_data)
             
-            filters.append(wavelet_data)
+            filters. append(wavelet_data)
         
-        filters = np.stack(filters).astype(np.float32)
-        filters = torch.from_numpy(filters).unsqueeze(1)
+        filters = np.stack(filters). astype(np.float32)
+        filters = torch.from_numpy(filters). unsqueeze(1)
         
         self.conv = nn.Conv1d(
             in_channels=1,
@@ -135,110 +121,101 @@ class PyTorchCWT(nn.Module):
             padding=0,
             bias=False
         )
-        self.conv.weight.data = filters
-        self.conv.weight.requires_grad = False
+        self.conv. weight.data = filters
+        self.conv.weight. requires_grad = False
     
     def forward(self, x, target_time=60):
-        """
-        Args:
-            x: (B, L) or (B, 1, L) - PPG signals
-            target_time: Output time resolution
-            
-        Returns:
-            (B, num_scales, target_time) - Scalogram
-        """
         if x.dim() == 2:
             x = x.unsqueeze(1)
         
         # 1. Reflection padding
         x_padded = F.pad(x, (self.padding_size, self.padding_size), mode='reflect')
         
-        # 2. Convolve
+        # 2.  Convolve
         cwt_out = self.conv(x_padded)
-        scalogram = torch.abs(cwt_out)  # (B, num_scales, L)
+        scalogram = torch.abs(cwt_out)
         
-        # 3.  Temporal pooling to target resolution
+        # 3. Temporal pooling
         original_device = scalogram.device
-        if x.device.type == 'mps':
-            scalogram = scalogram.cpu()
+        if x.device. type == 'mps':
+            scalogram = scalogram. cpu()
         
         scalogram = F.adaptive_avg_pool1d(scalogram, target_time)
         
         if x.device.type == 'mps':
             scalogram = scalogram.to(original_device)
         
-        return scalogram  # (B, num_scales, target_time)
-
-
-def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda',
-                               fmin=0.1, fmax=0.5, normalization='per_column'):
-    """
-    Compute CWT scalograms on GPU with improved normalization.
+        return scalogram
     
-    CHANGES:
-    1. fmax: 0.8 -> 0. 5 (respiratory only)
-    2.  normalization: 'per_column' for peak detection, 'quantile' for global patterns
+# def compute_freq_features_gpu(ppg_segments, fs=125, batch_size=500, device='cuda',
+#                                fmin=0.1, fmax=0.5, normalization='per_column'):
+#     """
+#     Compute CWT scalograms on GPU with improved normalization.
     
-    Args:
-        ppg_segments: List of 1D PPG arrays
-        fs: Sampling frequency
-        batch_size: GPU batch size
-        device: 'cuda' or 'cpu'
-        fmin: Minimum frequency (Hz)
-        fmax: Maximum frequency (Hz) - CHANGED to 0.5
-        normalization: 'per_column', 'quantile', or 'global'
+#     CHANGES:
+#     1. fmax: 0.8 -> 0. 5 (respiratory only)
+#     2.  normalization: 'per_column' for peak detection, 'quantile' for global patterns
     
-    Returns:
-        np.ndarray of shape (N, 128, 60)
-    """
-    if not ppg_segments:
-        return np.array([])
+#     Args:
+#         ppg_segments: List of 1D PPG arrays
+#         fs: Sampling frequency
+#         batch_size: GPU batch size
+#         device: 'cuda' or 'cpu'
+#         fmin: Minimum frequency (Hz)
+#         fmax: Maximum frequency (Hz) - CHANGED to 0.5
+#         normalization: 'per_column', 'quantile', or 'global'
     
-    # Initialize model with CORRECT frequency range
-    cwt_model = PyTorchCWT(
-        fs=fs, 
-        num_scales=128, 
-        fmin=fmin, 
-        fmax=fmax  # Now 0.5 by default
-    ).to(device)
-    cwt_model.eval()
+#     Returns:
+#         np.ndarray of shape (N, 128, 60)
+#     """
+#     if not ppg_segments:
+#         return np.array([])
     
-    # Input Z-Score normalization
-    input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
-    mu = input_tensor.mean(dim=1, keepdim=True)
-    std = input_tensor.std(dim=1, keepdim=True)
-    input_tensor = (input_tensor - mu) / torch.clamp(std, min=0.001)
-    input_tensor = input_tensor.to(device)
+#     # Initialize model with CORRECT frequency range
+#     cwt_model = PyTorchCWT(
+#         fs=fs, 
+#         num_scales=128, 
+#         fmin=fmin, 
+#         fmax=fmax  # Now 0.5 by default
+#     ).to(device)
+#     cwt_model.eval()
     
-    all_scalograms = []
+#     # Input Z-Score normalization
+#     input_tensor = torch.tensor(np.stack(ppg_segments), dtype=torch.float32)
+#     mu = input_tensor.mean(dim=1, keepdim=True)
+#     std = input_tensor.std(dim=1, keepdim=True)
+#     input_tensor = (input_tensor - mu) / torch.clamp(std, min=0.001)
+#     input_tensor = input_tensor.to(device)
     
-    with torch.no_grad():
-        for i in range(0, len(input_tensor), batch_size):
-            batch = input_tensor[i:i + batch_size]
+#     all_scalograms = []
+    
+#     with torch.no_grad():
+#         for i in range(0, len(input_tensor), batch_size):
+#             batch = input_tensor[i:i + batch_size]
             
-            # Compute raw CWT
-            raw_scalograms = cwt_model(batch, target_time=60)  # (B, 128, 60)
+#             # Compute raw CWT
+#             raw_scalograms = cwt_model(batch, target_time=60)  # (B, 128, 60)
             
-            # Apply normalization based on method
-            if normalization == 'per_column':
-                # Per-column (per-timestep) normalization
-                # This is BEST for peak detection at each timestep
-                scalograms = normalize_per_column(raw_scalograms)
+#             # Apply normalization based on method
+#             if normalization == 'per_column':
+#                 # Per-column (per-timestep) normalization
+#                 # This is BEST for peak detection at each timestep
+#                 scalograms = normalize_per_column(raw_scalograms)
                 
-            elif normalization == 'quantile':
-                # Quantile normalization per image (your original method)
-                scalograms = normalize_quantile(raw_scalograms)
+#             elif normalization == 'quantile':
+#                 # Quantile normalization per image (your original method)
+#                 scalograms = normalize_quantile(raw_scalograms)
                 
-            elif normalization == 'global':
-                # Simple min-max per image
-                scalograms = normalize_global(raw_scalograms)
+#             elif normalization == 'global':
+#                 # Simple min-max per image
+#                 scalograms = normalize_global(raw_scalograms)
                 
-            else:
-                raise ValueError(f"Unknown normalization: {normalization}")
+#             else:
+#                 raise ValueError(f"Unknown normalization: {normalization}")
             
-            all_scalograms.append(scalograms.cpu().numpy())
+#             all_scalograms.append(scalograms.cpu().numpy())
     
-    return np.concatenate(all_scalograms, axis=0)
+#     return np.concatenate(all_scalograms, axis=0)
 
 
 def normalize_per_column(scalograms):
