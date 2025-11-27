@@ -88,7 +88,7 @@ def visualize_scalogram_with_rr(scalogram, rr_label, fmin=0.1, fmax=0.8,
     ax3. plot(results['true_rr'], 'r-', label='True RR', alpha=0.7)
     ax3.set_xlabel('Time (s)')
     ax3.set_ylabel('Respiratory Rate (BPM)')
-    ax3.set_title(f"Peak Detection - MAE: {results['mae']:.2f}, Corr: {results['correlation']:. 3f}")
+    ax3.set_title(f"Peak Detection - MAE: {results['mae']:.2f}, Corr: {results['correlation']:.3f}")
     ax3.legend()
     
     plt.tight_layout()
@@ -100,7 +100,7 @@ def batch_quality_check(scalograms, rr_labels, n_samples=10):
     Check quality across multiple samples.
     """
     n = min(n_samples, len(scalograms))
-    indices = np.random. choice(len(scalograms), n, replace=False)
+    indices = np.random.choice(len(scalograms), n, replace=False)
     
     all_maes = []
     all_corrs = []
