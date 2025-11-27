@@ -111,8 +111,8 @@ def diagnose_single_sample(ppg_segment, rr_label, fs=125, subject_id="unknown"):
         
         print(f"\n   {config['name']}:")
         print(f"      Peak detection MAE: {mae:.2f} BPM")
-        print(f"      Detected RR range: {detected_rr.min():.1f} - {detected_rr.max():. 1f} BPM")
-        print(f"      True RR range: {true_rr. min():.1f} - {true_rr.max():.1f} BPM")
+        print(f"      Detected RR range: {detected_rr.min():.1f} - {detected_rr.max():.1f} BPM")
+        print(f"      True RR range: {true_rr.min():.1f} - {true_rr.max():.1f} BPM")
         print(f"      % at fmin boundary: {at_fmin:.1f}%")
         print(f"      % at fmax boundary: {at_fmax:.1f}%")
         
