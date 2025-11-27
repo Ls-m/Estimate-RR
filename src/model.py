@@ -90,7 +90,7 @@ class CNNLinearModel(nn.Module):
             nn.Conv1d(in_channels=1, out_channels=1, kernel_size=5, padding=1, stride=2),
             nn.ReLU(),
             nn.Flatten(start_dim=1),
-            nn.Linear(624, hidden_size),
+            nn.Linear(623, hidden_size),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, output_size)
         )
