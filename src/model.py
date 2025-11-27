@@ -96,7 +96,24 @@ class CNNLinearModel(nn.Module):
     def forward(self, x):
         x = x.unsqueeze(1)  # Add channel dimension
         return self.model(x)
-    
+
+class SimpleCNNLinearModel(nn.Module):
+    def __init__(self, input_size=60*125, 
+          hidden_size=2048, output_size=512, dropout=0):
+        super(SimpleCNNLinearModel, self).__init__()
+        self.model = nn.Sequential(
+            nn.Conv1d(in_channels=1, out_channels=2, kernel_size=11, padding=1, stride=3),
+            nn.ReLU(),
+            nn.Flatten(start_dim=1),
+            nn.Linear(4994, hidden_size),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, output_size)
+        )
+
+    def forward(self, x):
+        x = x.unsqueeze(1)  # Add channel dimension
+        return self.model(x)
+       
 class FreqEncoder(nn.Module):
     def __init__(self, n_bins, hidden=32):
         super().__init__()
@@ -863,7 +880,7 @@ class RRLightningModule(pl.LightningModule):
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
-                model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=128, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                model = SimpleCNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=128, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
