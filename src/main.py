@@ -711,7 +711,7 @@ def create_segments_simple(subject_id, ppg_signal, rr_labels, ppg_fs, rr_fs, win
         # Corresponding RR indices (1 Hz)
         rr_start = int(np.floor(start / fs_ratio))
         rr_end = int(np.floor((end - 1) / fs_ratio))
-        rr_slice = rr_labels[rr_start:rr_end + 1]
+        rr_slice = rr_labels[rr_start:rr_end + 2]
 
         if len(rr_slice) == 0 or np.isnan(rr_slice).any() or np.any(rr_slice == 0):
             continue
