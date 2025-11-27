@@ -93,6 +93,7 @@ class CNNLinearModel(nn.Module):
         )
 
     def forward(self, x):
+        x = x.unsqueeze(1)  # Add channel dimension
         return self.model(x)
     
 class FreqEncoder(nn.Module):
