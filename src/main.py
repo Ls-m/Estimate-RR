@@ -42,6 +42,7 @@ from augmenter import *
 from dataval import *
 from debug import *
 from investigate_rr import *
+from cwt_generator import *
 
 logger = logging.getLogger("ReadData")
 def load_subjects_bidmc(path):
@@ -1480,10 +1481,19 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
   
 
         logger.info(f"compute frequency segments with gpu")
+        # freq_segments = compute_freq_features_gpu(
+        #     ppg_segments, 
+        #     fs=original_rate, 
+        #     device=device
+        # )
+
         freq_segments = compute_freq_features_gpu(
             ppg_segments, 
             fs=original_rate, 
-            device=device
+            device=device,
+            fmin=0.1,
+            fmax=0.5,  # CHANGED from 0.8
+            normalization='per_column'  # CHANGED from quantile
         )
 
         processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
@@ -2756,6 +2766,31 @@ def main(cfg: DictConfig):
 
     logger.info("Investigating RR labels...")
     label_results = batch_label_investigation(processed_data, n_samples=10)
+
+
+
+    logger.info("Validating improved CWT...")
+    
+    # Collect all segments
+    all_ppg = []
+    all_rr = []
+    for subject_id, (ppg_segs, rr_segs, _, _) in processed_data.items():
+        all_ppg.extend(ppg_segs)
+        all_rr.extend(rr_segs)
+    
+    # Validate
+    validation_results = validate_cwt_peak_detection(
+        all_ppg, 
+        all_rr, 
+        fs=125, 
+        device='cuda' if torch.cuda. is_available() else 'cpu',
+        fmin=0.1,
+        fmax=0.5,
+        n_samples=100
+    )
+    
+    if validation_results['mean_mae'] > 5.0:
+        logger.warning("CWT validation failed!  Check your preprocessing.")
     exit()
     processed_capnobase_ssl = None  # Initialize to None
     if cfg.ssl.use_capnobase:
