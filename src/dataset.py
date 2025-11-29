@@ -102,7 +102,7 @@ class PPGRRDataset(torch.utils.data.Dataset):
         # ... load data ...
         # Let's assume 'scalogram' is your (128, 60) numpy array
         ppg_segment = self.ppg_data[idx]
-        rr = self.rr_data[idx]
+        rr = self.rr_data[0] #ATTENTION ERROR PRONEEEEEEE
         freq = self.freq_data[idx]
         breath = self.breath_data[idx]
         scalogram_tensor = torch.tensor(freq) # (128, 60)
@@ -178,12 +178,12 @@ class PPGRRDataModule(LightningDataModule):
 
     def train_dataloader(self):
         # Example: accessing labels directly from the stored list in dataset
-        train_labels = self.train_dataset.rr_data # Or whatever variable holds the Y targets
+        # train_labels = self.train_dataset.rr_data # Or whatever variable holds the Y targets
         
-        # Calculate the mean RR for each 60-value segment
-        mean_rr_targets = [np.mean(segment) for segment in train_labels]
-        # 2. Create the sampler
-        sampler = make_balanced_sampler(mean_rr_targets)
+        # # Calculate the mean RR for each 60-value segment
+        # mean_rr_targets = [np.mean(segment) for segment in train_labels]
+        # # 2. Create the sampler
+        # sampler = make_balanced_sampler(mean_rr_targets)
 
         return torch.utils.data.DataLoader(
             self.train_dataset,
