@@ -9,3 +9,7 @@ src/outputs/
 /profiles/
 /lightning_logs/
 /fold_*
+/*.png
+/execute.sh
+/best_hparams.json
+/src/exploration.py
