@@ -71,21 +71,28 @@ def load_files_bidmc(path,subjects):
         
         signal_file = path+"/bidmc_"+subject+"_Signals.csv"
         numeric_file = path+"/bidmc_"+subject+"_Numerics.csv"
+        breath_file = path+"/bidmc_"+subject+"_Breaths.csv"
 
         signal_df = pd.read_csv(signal_file) if os.path.exists(signal_file) else None
         numeric_df = pd.read_csv(numeric_file) if os.path.exists(numeric_file) else None
-
+        breath_df = pd.read_csv(breath_file) if os.path.exists(breath_file) else None
         signal_df.columns = signal_df.columns.str.strip()
         numeric_df.columns = numeric_df.columns.str.strip()
+        breath_df.columns = breath_df.columns.str.strip()
 
         for col in signal_df.columns:
             signal_df[col] = pd.to_numeric(signal_df[col], errors='coerce')
         
         for col in numeric_df.columns:
             numeric_df[col] = pd.to_numeric(numeric_df[col], errors='coerce')
+        for col in breath_df.columns:
+            breath_df[col] = pd.to_numeric(breath_df[col], errors='coerce')
+
+        
 
         ppg = signal_df["PLETH"].values
         rr = numeric_df["RESP"].values
+        breath = breath_df[["breaths ann1 [signal sample no]", "breaths ann2 [signal sample no]"]].mean(axis=1, skipna=True).values
         min_RR = min(min_RR, np.nanmin(rr))
         if np.nanmin(rr) == 0:
             min_subject.append(subject)
@@ -95,17 +102,20 @@ def load_files_bidmc(path,subjects):
         if np.any(np.isnan(rr)) or np.any(np.isinf(rr)):
             logger.info(f"RR data contains NaN or Inf values for subject: {subject}")
 
+        if np.any(np.isnan(breath)) or np.any(np.isinf(breath)):
+            logger.info(f"Breath data contains NaN or Inf values for subject: {subject}")
+        
         # subject_dict = {
         #     "subject_id": subject,
         #     "PPG": ppg,
         #     "RR": rr
         # }
-        raw_data[subject] = (ppg, rr)
+        raw_data[subject] = (ppg, rr, breath)
 
     logger.info(f"Minimum RR subjects for bidmc dataset: {min_subject}")
     logger.info(f"Minimum RR for bidmc dataset: {min_RR}")
-    for subject, (ppg, rr) in raw_data.items():
-        logger.debug(f"for subject {subject} PPG length: {len(ppg)}, RR length: {len(rr)}")
+    for subject, (ppg, rr, breath) in raw_data.items():
+        logger.debug(f"for subject {subject} PPG length: {len(ppg)}, RR length: {len(rr)}, Breath length: {len(breath)}")
 
     return raw_data
 
@@ -689,40 +699,55 @@ def create_segments_with_gap_handling(subject_id, ppg_signal, rr_labels, origina
     return ppg_segments, final_rr_labels
 
 
-def create_segments_simple(subject_id, ppg_signal, rr_labels, ppg_fs, rr_fs, window_size_sec, overlap_sec):
-
+def create_segments_simple(subject_id, ppg_signal, rr_labels, breath, ppg_fs, rr_fs, window_size_sec, overlap_sec):
+    # print(f"rr labels before squeeze: {rr_labels}")
+   
     step_size_sec = window_size_sec - overlap_sec
     ppg_signal = np.asarray(ppg_signal).squeeze()
     rr_labels = np.asarray(rr_labels).squeeze()
-
+    # print(f"rr labels after squeeze: {rr_labels}")
+  
     window_samples = int(window_size_sec * ppg_fs)
     step_samples = int(step_size_sec * ppg_fs)
     fs_ratio = ppg_fs / rr_fs
 
     ppg_segments = []
     rr_segments = []
+    breath_segments = []
 
     for start in range(0, len(ppg_signal) - window_samples + 1, step_samples):
         end = start + window_samples
         
         # Extract PPG window
         ppg_segment = ppg_signal[start:end]
-
+        breath_slice = breath[(breath >= start) & (breath <= end)]
+        
         # Corresponding RR indices (1 Hz)
         rr_start = int(np.floor(start / fs_ratio))
         rr_end = int(np.floor((end - 1) / fs_ratio))
-        rr_slice = rr_labels[rr_start:rr_end + 2]
+        # rr_slice = rr_labels[rr_start:rr_end + 1]
+        rr_slice = rr_labels[rr_start:rr_end + 2] # test prediction of future rr
 
-        if len(rr_slice) == 0 or np.isnan(rr_slice).any() or np.any(rr_slice == 0):
+        # if len(rr_slice) == 0 or np.isnan(rr_slice).any() or np.any(rr_slice == 0):
+        #     continue
+
+        if len(breath_slice) == 0 or np.isnan(breath_slice).any() or np.any(breath_slice == 0):
+            print("Invalid breath segment")
             continue
-
         # # Optional: normalize each segment
         # ppg_segment_norm = (ppg_segment - np.mean(ppg_segment)) / (np.std(ppg_segment) + 1e-8)
         ppg_segment_norm = normalize_signal(ppg_segment)
         ppg_segments.append(ppg_segment_norm)
         rr_segments.append(np.array([rr_slice[-1]]))
-    
-    return ppg_segments, rr_segments
+        breath_segments.append(np.float64((len(breath_slice)*60)/window_size_sec))
+        print(f"Breath segment length for subject {subject_id}: {np.float64((len(breath_slice)*60)/window_size_sec)}")
+        print(f"average rr: {np.mean(rr_slice)}")
+        # print(f"type of len(breath_segments): {type(len(breath_slice))}")
+        # print(f"type of np.mean(rr_slice): {type(np.mean(rr_slice))}")
+
+        
+
+    return ppg_segments, rr_segments, breath_segments
 # Place this new function in the same file as your other processing functions
 
 def create_ssl_segments(subject_id, ppg_signal, original_len, removed_segments, ppg_fs, 
@@ -1413,11 +1438,12 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
     # for subject_data in raw_data:
     for i in range(1,len(raw_data)+1):
         # Example processing: normalize PPG and RR signals
-        if i==13:
-            continue
+        # if i==13:
+        #     continue
         ppg = raw_data[f"{i:02}"][0]
         rr = raw_data[f"{i:02}"][1]
-        
+        breath = raw_data[f"{i:02}"][2]
+
         if dataset_name == "bidmc":
             original_rate = 125
 
@@ -1498,13 +1524,13 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
                 step_size_sec=16
             )
         else:
-            ppg_segments, rr_segments = create_segments_simple(subject_id, ppg_cliped, rr_labels_denoised,ppg_fs=original_rate,
+            ppg_segments, rr_segments, breath_segments = create_segments_simple(subject_id, ppg_cliped, rr_labels_denoised, breath, ppg_fs=original_rate,
                                                      rr_fs=1, window_size_sec=cfg.training.window_size, overlap_sec=cfg.training.overlap)
         
         # 3. [NEW] Create Segments for SSL (Broadband / Cardiac Preserved)
         # We use ppg_denoised here because it still contains the Heart Rate (> 1.0 Hz)
-        ppg_segments_ssl, _ = create_segments_simple(
-            subject_id, ppg_denoised, rr_labels_denoised, 
+        ppg_segments_ssl, _, _ = create_segments_simple(
+            subject_id, ppg_denoised, rr_labels_denoised, breath,
             ppg_fs=original_rate, rr_fs=1, 
             window_size_sec=cfg.training.window_size, overlap_sec=cfg.training.overlap
         )
@@ -1543,8 +1569,9 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         #     n_jobs=n_jobs  # Adjust based on your CPU cores
         # )
 
-        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl)
+        processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl, breath_segments)
         # logger.info(f"processed data is {processed_data}")
+        
         
     return processed_data
 
@@ -1678,10 +1705,9 @@ def create_folds(processed_data, n_splits=10, seed=42):
     # Fix random seeds for reproducibility
     np.random.seed(seed)
     random.seed(seed)
-
-    all_subjects = set(subject_id for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items())
+    all_subjects = set(processed_data.keys())
     subjects_array = np.array(sorted(all_subjects))
-            
+    # print(f"in create_folds: {all_subjects}")
     # Shuffle subjects
     shuffled_indices = np.random.permutation(len(list(all_subjects)))
     shuffled_subjects = subjects_array[shuffled_indices]
@@ -1733,18 +1759,21 @@ def create_data_splits(cv_split, processed_data):
     validation_subjects = cv_split["val_subjects"]
     test_subjects = cv_split["test_subjects"]
 
-    subject_ids = [subject_id for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items()]
-
+    subject_ids = list(processed_data.keys())
+    # print(f"in create_data_splits: {subject_ids}")
+    
     train_ppg_list = []
     train_rr_list = []
     train_freq_list = []
     train_ppg_ssl_list = []
+    train_breath_list = []
     for train_subject in train_subjects:
         if train_subject in subject_ids:
             train_ppg_list.append(processed_data[train_subject][0])
             train_rr_list.append(processed_data[train_subject][1])
             train_freq_list.append(processed_data[train_subject][2])
             train_ppg_ssl_list.append(processed_data[train_subject][3])
+            train_breath_list.append(processed_data[train_subject][4])
         else:
             logger.warning(f"Train subject {train_subject} not found in processed data.")
     
@@ -1752,12 +1781,14 @@ def create_data_splits(cv_split, processed_data):
     val_rr_list = []
     val_freq_list = []
     val_ppg_ssl_list = []
+    val_breath_list = []
     for val_subject in validation_subjects:
         if val_subject in subject_ids:
             val_ppg_list.append(processed_data[val_subject][0])
             val_rr_list.append(processed_data[val_subject][1])
             val_freq_list.append(processed_data[val_subject][2])
             val_ppg_ssl_list.append(processed_data[val_subject][3])
+            val_breath_list.append(processed_data[val_subject][4])
         else:
             logger.warning(f"Validation subject {val_subject} not found in processed data.")
 
@@ -1765,12 +1796,14 @@ def create_data_splits(cv_split, processed_data):
     test_rr_list = []
     test_freq_list = []
     test_ppg_ssl_list = []
+    test_breath_list = []
     for test_subject in test_subjects:
         if test_subject in subject_ids:
             test_ppg_list.append(processed_data[test_subject][0])
             test_rr_list.append(processed_data[test_subject][1])
             test_freq_list.append(processed_data[test_subject][2])
             test_ppg_ssl_list.append(processed_data[test_subject][3])
+            test_breath_list.append(processed_data[test_subject][4])
         else:
             logger.warning(f"Test subject {test_subject} not found in processed data.")
 
@@ -1778,7 +1811,8 @@ def create_data_splits(cv_split, processed_data):
     train_ppg = np.concatenate(train_ppg_list, axis=0).tolist()
     train_rr = np.concatenate(train_rr_list, axis=0).tolist()
     train_freq = np.concatenate(train_freq_list, axis=0).tolist()
-    
+    train_breath = np.concatenate(train_breath_list, axis=0).tolist()
+
     # --- DEBUG CHECK ---
     # If this prints a shape like (141, 7500), we have a problem. 
     # It should print a length (e.g., 7500).
@@ -1792,16 +1826,17 @@ def create_data_splits(cv_split, processed_data):
     # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
     #     train_ppg, train_rr, train_freq
     # )
-    train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis_fixed(
-        train_ppg, train_rr, train_freq
-    )
+    # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis_fixed(
+    #     train_ppg, train_rr, train_freq
+    # )
     val_ppg = np.concatenate(val_ppg_list, axis=0).tolist()
     val_rr = np.concatenate(val_rr_list, axis=0).tolist()
     val_freq = np.concatenate(val_freq_list, axis=0).tolist()
+    val_breath = np.concatenate(val_breath_list, axis=0).tolist()
     test_ppg = np.concatenate(test_ppg_list, axis=0).tolist()
     test_rr = np.concatenate(test_rr_list, axis=0).tolist()
     test_freq = np.concatenate(test_freq_list, axis=0).tolist()
-
+    test_breath = np.concatenate(test_breath_list, axis=0).tolist()
     # --- CHANGE 4: Concatenate SSL Data ---
     train_ppg_ssl = np.concatenate(train_ppg_ssl_list, axis=0).tolist()
     val_ppg_ssl = np.concatenate(val_ppg_ssl_list, axis=0).tolist()
@@ -1816,17 +1851,20 @@ def create_data_splits(cv_split, processed_data):
     logger.info(f"total number of subjects in this fold {id} is {len(train_subjects)+len(validation_subjects)+len(test_subjects)}")
     logger.info(f"number of train subjects is {len(train_subjects)}, number of val subjects is{len(validation_subjects)}, number of test subjects is{len(test_subjects)}")
     return {
-        'train_ppg': train_ppg_bal,
-        'train_rr': train_rr_bal,
-        'train_freq': train_freq_bal,
+        'train_ppg': train_ppg,
+        'train_rr': train_rr,
+        'train_freq': train_freq,
+        'train_breath': train_breath,
         'train_ppg_ssl': train_ppg_ssl,
         'val_ppg': val_ppg,
         'val_rr': val_rr,
         'val_freq': val_freq,
+        'val_breath': val_breath,
         'val_ppg_ssl': val_ppg_ssl,
         'test_ppg': test_ppg,
         'test_rr': test_rr,
         'test_freq': test_freq,
+        'test_breath': test_breath,
         'train_subjects': train_subjects,
         'val_subjects': validation_subjects,
         'test_subjects': test_subjects
@@ -2467,13 +2505,10 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fold_data = create_data_splits(cv_split, processed_data)
         # logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
         # analyze_fold_distribution_after_augmentation(fold_id, fold_data)
-        
-        train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'],
-        augment=cfg.training.use_augmentation)
-        val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'],
-        augment=False)
-        test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'],
-        augment=False)
+
+        train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
+        val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'], fold_data['val_breath'], augment=False)
+        test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'], fold_data['test_breath'], augment=False)
 
         batch_size = cfg.training.batch_size
         num_workers = cfg.training.num_workers
@@ -2714,6 +2749,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 def main(cfg: DictConfig):
     print(cfg)
     raw_data = read_data(cfg.data.path)
+    
     # print(raw_data['07'][1])
     # exit()
     processed_data = process_data(cfg, raw_data)
@@ -2724,8 +2760,8 @@ def main(cfg: DictConfig):
     
     count_zero = 0
     segment_counts = {}
-    for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl) in processed_data.items():
-        
+    for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl, breath_segments) in processed_data.items():
+
         n_segments = len(rr_segments)   # or entry["PPG"].shape[0]
         segment_counts[subject_id] = n_segments
         if n_segments == 0: count_zero += 1

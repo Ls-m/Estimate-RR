@@ -72,12 +72,13 @@ def make_balanced_sampler(rr_targets):
 
     
 class PPGRRDataset(torch.utils.data.Dataset):
-    def __init__(self, cfg, ppg_data, rr_labels, freq_data, augment=False):
+    def __init__(self, cfg, ppg_data, rr_labels, freq_data, breath_labels, augment=False):
         # ... existing init ...
         self.augment = augment
         self.ppg_data = ppg_data
         self.rr_data = rr_labels
         self.freq_data = freq_data
+        self.breath_data = breath_labels
         self.cfg = cfg
 
         if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
@@ -85,6 +86,8 @@ class PPGRRDataset(torch.utils.data.Dataset):
         
         if np.any(np.isnan(rr_labels)) or np.any(np.isinf(rr_labels)):
             logger.info(f"nan or inf in rr_data")
+        if np.any(np.isnan(breath_labels)) or np.any(np.isinf(breath_labels)):
+            logger.info(f"nan or inf in breath_data")
 
         # Define augmentations
         # Mask up to 20 frequency bins (out of 128)
@@ -101,6 +104,7 @@ class PPGRRDataset(torch.utils.data.Dataset):
         ppg_segment = self.ppg_data[idx]
         rr = self.rr_data[idx]
         freq = self.freq_data[idx]
+        breath = self.breath_data[idx]
         scalogram_tensor = torch.tensor(freq) # (128, 60)
         
         if self.augment:
@@ -116,7 +120,8 @@ class PPGRRDataset(torch.utils.data.Dataset):
 
         ppg_tensor = torch.tensor(ppg_segment, dtype=torch.float32)
         rr_tensor = torch.tensor(rr, dtype=torch.float32)
-        return ppg_tensor, rr_tensor, scalogram_tensor
+        breath_tensor = torch.tensor(breath, dtype=torch.float32)
+        return ppg_tensor, rr_tensor, scalogram_tensor, breath_tensor
 
 # class PPGRRDataset(Dataset):
 #     def __init__(self, cfg, ppg_data, rr_data, freq_data, augment=False):
