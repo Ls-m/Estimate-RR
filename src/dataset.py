@@ -103,7 +103,7 @@ class PPGRRDataset(torch.utils.data.Dataset):
         # Let's assume 'scalogram' is your (128, 60) numpy array
         ppg_segment = self.ppg_data[idx]
         rr = self.rr_data[0] #ATTENTION ERROR PRONEEEEEEE
-        freq = self.freq_data[idx]
+        freq = self.freq_data[0] #ATTENTION ERROR PRONEEEEEEE
         breath = self.breath_data[idx]
         scalogram_tensor = torch.tensor(freq) # (128, 60)
         
