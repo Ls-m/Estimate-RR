@@ -109,6 +109,7 @@ class PPGtoRR(nn.Module):
         self.fc3 = nn.Linear(128, 1)
         
     def forward(self, x):
+        x = x.unsqueeze(1)
         # x shape: [batch, 1, 7500]
         x = torch.relu(self.conv1(x))
         x = self.pool1(x)
