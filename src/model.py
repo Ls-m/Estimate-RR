@@ -140,16 +140,19 @@ class CNNLinearModel(nn.Module):
           hidden_size=2048, output_size=512, dropout=0):
         super(CNNLinearModel, self).__init__()
         self.model = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=8, kernel_size=127, padding=0, stride=2),
+            nn.Conv1d(in_channels=1, out_channels=8, kernel_size=250, padding=0, stride=2),
+            nn.BatchNorm1d(8),
             nn.ReLU(),
-            nn.Conv1d(in_channels=8, out_channels=8, kernel_size=127, padding=0, stride=2),
+            nn.Conv1d(in_channels=8, out_channels=16, kernel_size=125, padding=0, stride=2),
+            nn.BatchNorm1d(16),
             nn.ReLU(),
             # nn.Conv1d(in_channels=4, out_channels=2, kernel_size=127, padding=0, stride=2),
             # nn.ReLU(),
-            nn.Conv1d(in_channels=8, out_channels=4, kernel_size=127, padding=0, stride=1),
+            nn.Conv1d(in_channels=16, out_channels=8, kernel_size=125, padding=0, stride=1),
+            nn.BatchNorm1d(8),
             nn.ReLU(),
             nn.Flatten(start_dim=1),
-            nn.Linear(1655*4, hidden_size),
+            nn.Linear(1655*8, hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, hidden_size//4),
@@ -945,8 +948,8 @@ class RRLightningModule(pl.LightningModule):
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
-                model = PPGtoRR(input_length=cfg.training.window_size*125)
-                # model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                # model = PPGtoRR(input_length=cfg.training.window_size*125)
+                model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
