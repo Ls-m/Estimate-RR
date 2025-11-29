@@ -152,7 +152,7 @@ class CNNLinearModel(nn.Module):
             nn.BatchNorm1d(8),
             nn.ReLU(),
             nn.Flatten(start_dim=1),
-            nn.Linear(13240, hidden_size),
+            nn.Linear(13016, hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_size, hidden_size//4),
