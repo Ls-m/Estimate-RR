@@ -16,7 +16,7 @@ data:
 training:
   model_name: "Linear" # Model architecture to use options: ["LSTMRR", "RWKV", "RWKVTime", "RWKVTimeOPT"]
   batch_size: 64 # Batch size for training
-  learning_rate: 1e-5 # Learning rate for the optimizer
+  learning_rate: 1e-3 # Learning rate for the optimizer
   optimizer: "adamw" # Optimizer type options: ["adam", "adamw", "sgd"]
   weight_decay: 1e-4 # Weight decay for regularization
   scheduler: "ReduceLROnPlateau" # Learning rate scheduler type options: ["StepLR", "ReduceLROnPlateau", "CosineAnnealingLR"]
