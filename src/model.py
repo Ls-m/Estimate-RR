@@ -77,7 +77,63 @@ class LinearModel(nn.Module):
 
     def forward(self, x):
         return self.model(x)
-    
+
+
+class PPGtoRR(nn.Module):
+    def __init__(self, input_length=7500):
+        super(PPGtoRR, self).__init__()
+        
+        # Convolutional layers for feature extraction from 1D PPG signal
+        self.conv1 = nn.Conv1d(1, 32, kernel_size=7, stride=1, padding=3)
+        self.pool1 = nn.MaxPool1d(2, stride=2)
+        
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=5, stride=1, padding=2)
+        self.pool2 = nn.MaxPool1d(2, stride=2)
+        
+        self.conv3 = nn.Conv1d(64, 128, kernel_size=3, stride=1, padding=1)
+        self.pool3 = nn.MaxPool1d(2, stride=2)
+        
+        self.conv4 = nn.Conv1d(128, 256, kernel_size=3, stride=1, padding=1)
+        self.pool4 = nn.MaxPool1d(2, stride=2)
+        
+        # Calculate flattened size: input 7500 / 16 (from 4 pools of 2) = ~468, times 256 channels = ~119808
+        self.flatten_size = (input_length // 16) * 256
+        
+        # Fully connected layers for regression
+        self.fc1 = nn.Linear(self.flatten_size, 512)
+        self.dropout1 = nn.Dropout(0.5)
+        
+        self.fc2 = nn.Linear(512, 128)
+        self.dropout2 = nn.Dropout(0.5)
+        
+        self.fc3 = nn.Linear(128, 1)
+        
+    def forward(self, x):
+        # x shape: [batch, 1, 7500]
+        x = torch.relu(self.conv1(x))
+        x = self.pool1(x)
+        
+        x = torch.relu(self.conv2(x))
+        x = self.pool2(x)
+        
+        x = torch.relu(self.conv3(x))
+        x = self.pool3(x)
+        
+        x = torch.relu(self.conv4(x))
+        x = self.pool4(x)
+        
+        x = x.view(x.size(0), -1)  # Flatten
+        
+        x = torch.relu(self.fc1(x))
+        x = self.dropout1(x)
+        
+        x = torch.relu(self.fc2(x))
+        x = self.dropout2(x)
+        
+        x = self.fc3(x)  # Linear output for regression
+        
+        return x
+
 class CNNLinearModel(nn.Module):
     def __init__(self, input_size=60*125, 
           hidden_size=2048, output_size=512, dropout=0):
@@ -888,7 +944,8 @@ class RRLightningModule(pl.LightningModule):
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
-                model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                model = PPGtoRR(input_length=cfg.training.window_size*125)
+                # model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
