@@ -995,12 +995,12 @@ class RRLightningModule(pl.LightningModule):
                     print(f"Failed to load freq weights: {e}")
 
         
-        self.head = nn.Sequential(
-            nn.Linear(fusion_dim, 128),
-            nn.ReLU(),
-            nn.Dropout(cfg.training.dropout),
-            nn.Linear(128, 60)
-        )
+        # self.head = nn.Sequential(
+        #     nn.Linear(fusion_dim, 128),
+        #     nn.ReLU(),
+        #     nn.Dropout(cfg.training.dropout),
+        #     nn.Linear(128, 60)
+        # )
 
         if cfg.training.criterion == "MSELoss":
             self.criterion = nn.MSELoss()
@@ -1032,22 +1032,21 @@ class RRLightningModule(pl.LightningModule):
  
     
     def training_step(self, batch, batch_idx):
-        ppg, rr, freq = batch
+        ppg, rr, freq, breath = batch
         bs = ppg.shape[0]
-        # if len(ppg.shape) > 2:
-        #     ppg = ppg.squeeze()
-        # else:
-        #     print("this is ppg shape: ", ppg.shape)
+       
         rr_pred = self.forward(ppg, freq)
-        # rr_pred = rr_pred.squeeze(-1)
-        loss = self.criterion(rr_pred, rr)
+
+        # loss = self.criterion(rr_pred, rr)
+        loss = self.criterion(rr_pred, breath)
         current_lr = self.trainer.optimizers[0].param_groups[0]['lr']
         self.log("lr", current_lr, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
 
         # --- FIX 3: Use torchmetrics ---
         # This is DDP-safe. It logs 'train/MAE' and 'train/MSE'.
-        metrics = self.train_metrics(rr_pred, rr)
+        # metrics = self.train_metrics(rr_pred, rr)
+        metrics = self.train_metrics(rr_pred, breath)
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
         # --- End Fix 3 ---
 
@@ -1074,26 +1073,29 @@ class RRLightningModule(pl.LightningModule):
     #     self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
-        ppg, rr, freq = batch
+        ppg, rr, freq, breath = batch
         bs = ppg.shape[0]
         rr_pred = self.forward(ppg, freq)
-        # rr_pred = rr_pred.squeeze(-1)
-        loss = self.criterion(rr_pred, rr)
+        
+        # loss = self.criterion(rr_pred, rr)
+        loss = self.criterion(rr_pred, breath)
         self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
 
         # --- FIX 5: Use torchmetrics ---
         # This is DDP-safe. It logs 'val/MAE' and 'val/MSE'.
         # PL automatically creates 'val_mae' for callbacks from 'val/MAE'.
-        metrics = self.val_metrics(rr_pred, rr)
+        # metrics = self.val_metrics(rr_pred, rr)
+        metrics = self.val_metrics(rr_pred, breath)
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
         # --- End Fix 5 ---
         # STORE DATA FOR ANALYSIS (Return it to be collected at epoch end)
         output_data = {
         "val_loss": loss.detach().cpu(), # Detach to save memory
         "pred": rr_pred.detach().cpu(),
-        "target": rr.detach().cpu()
+        # "target": rr.detach().cpu()
+        "target": breath.detach().cpu()
         }
-        
+
         # Append to the list explicitly
         self.validation_step_outputs.append(output_data)
         
@@ -1200,14 +1202,17 @@ class RRLightningModule(pl.LightningModule):
 
     
     def test_step(self, batch, batch_idx):
-        ppg, rr, freq = batch
+        ppg, rr, freq, breath = batch
         bs = ppg.shape[0]
         rr_pred = self.forward(ppg, freq)
-        # rr_pred = rr_pred.squeeze(-1)
-        loss = self.criterion(rr_pred, rr)
+
+        # loss = self.criterion(rr_pred, rr)
+        loss = self.criterion(rr_pred, breath)
+
 
         self.log('test_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
-        metrics = self.test_metrics(rr_pred, rr)
+        # metrics = self.test_metrics(rr_pred, rr)
+        metrics = self.test_metrics(rr_pred, breath)
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
         # self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         # # Store outputs for epoch-end calculations
