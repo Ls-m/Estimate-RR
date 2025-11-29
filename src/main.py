@@ -739,9 +739,9 @@ def create_segments_simple(subject_id, ppg_signal, rr_labels, breath, ppg_fs, rr
         ppg_segment_norm = normalize_signal(ppg_segment)
         ppg_segments.append(ppg_segment_norm)
         rr_segments.append(np.array([rr_slice[-1]]))
-        breath_segments.append(np.float64((len(breath_slice)*60)/window_size_sec))
-        print(f"Breath segment length for subject {subject_id}: {np.float64((len(breath_slice)*60)/window_size_sec)}")
-        print(f"average rr: {np.mean(rr_slice)}")
+        breath_segments.append([np.float64((len(breath_slice)*60)/window_size_sec)])
+        # print(f"Breath segment length for subject {subject_id}: {np.float64((len(breath_slice)*60)/window_size_sec)}")
+        # print(f"average rr: {np.mean(rr_slice)}")
         # print(f"type of len(breath_segments): {type(len(breath_slice))}")
         # print(f"type of np.mean(rr_slice): {type(np.mean(rr_slice))}")
 
