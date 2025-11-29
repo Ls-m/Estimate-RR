@@ -139,7 +139,7 @@ class CNNLinearModel(nn.Module):
     def __init__(self, input_size=60*125, 
           hidden_size=2048, output_size=512, dropout=0):
         super(CNNLinearModel, self).__init__()
-        self.cnn = nn.Sequential(
+        self.model = nn.Sequential(
             nn.Conv1d(in_channels=1, out_channels=8, kernel_size=250, padding=0, stride=2),
             nn.BatchNorm1d(8),
             nn.ReLU(),
@@ -151,46 +151,19 @@ class CNNLinearModel(nn.Module):
             nn.Conv1d(in_channels=16, out_channels=8, kernel_size=125, padding=0, stride=1),
             nn.BatchNorm1d(8),
             nn.ReLU(),
-            # nn.Flatten(start_dim=1),
-            # nn.Linear(13016, hidden_size),
-            # nn.ReLU(),
-            # nn.Dropout(dropout),
-            # nn.Linear(hidden_size, hidden_size//4),
-            # nn.ReLU(),
-            # nn.Dropout(dropout),
-            # nn.Linear(hidden_size//4, output_size)
-        )
-        self.lstm = nn.LSTM(
-            input_size=8,       # conv channels
-            hidden_size=1024,
-            batch_first=True,
-            num_layers=1,
-            bidirectional=False
-        )
-        self.fc = nn.Sequential(
+            nn.Flatten(start_dim=1),
+            nn.Linear(13016, hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size, hidden_size // 4),
+            nn.Linear(hidden_size, hidden_size//4),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size // 4, output_size)
+            nn.Linear(hidden_size//4, output_size)
         )
 
     def forward(self, x):
         x = x.unsqueeze(1)  # Add channel dimension
-        x = self.cnn(x)  # → [B, 8, 1627]
-
-        # Prepare for LSTM: [B, C, L] → [B, L, C]
-        x = x.permute(0, 2, 1)
-
-        # LSTM
-        lstm_out, (h_n, c_n) = self.lstm(x)
-        
-        # Use final hidden state
-        x = h_n[-1]  # [B, lstm_hidden]
-
-        # FC layers
-        return self.fc(x)
+        return self.model(x)
 
 class SimpleCNNLinearModel(nn.Module):
     def __init__(self, input_size=60*125, 
