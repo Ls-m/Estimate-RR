@@ -1084,19 +1084,95 @@ def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, freq_list):
     
     return final_ppg, final_rr, final_freq
 
-def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
+# def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
+#     print("--- Starting Dataset Balancing (Parallelized) ---")
+    
+#     # Ensure inputs are lists
+#     if isinstance(ppg_list, np.ndarray): ppg_list = list(ppg_list)
+#     if isinstance(rr_list, np.ndarray): rr_list = list(rr_list)
+#     if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
+
+#     # 1. Organize Indices by Class
+#     class_indices = {0: [], 1: [], 2: [], 3: [], 4: []}
+    
+#     for i, rr in enumerate(rr_list):
+#         mean_rr = np.mean(rr)
+#         if mean_rr < 10: bin_idx = 0
+#         elif 10 <= mean_rr < 15: bin_idx = 1
+#         elif 15 <= mean_rr < 20: bin_idx = 2
+#         elif 20 <= mean_rr < 25: bin_idx = 3
+#         else: bin_idx = 4
+#         class_indices[bin_idx].append(i)
+
+#     # 2. Find Majority Count
+#     counts = [len(idxs) for idxs in class_indices.values()]
+#     target_count = max(counts)
+#     print(f"Initial Counts: {counts}")
+#     print(f"Target per class: {target_count}")
+    
+#     new_ppg, new_rr, new_freq = [], [], []
+#     new_ppg_raw = []
+#     # 3. Generate Data
+#     for bin_idx, indices in class_indices.items():
+#         current_count = len(indices)
+#         if current_count == 0:
+#             continue
+
+#         needed = target_count - current_count
+#         if needed <= 0:
+#             continue
+            
+#         print(f"Class {bin_idx}: Generating {needed} samples using {current_count} sources...")
+
+#         # Prepare the list of source data to augment
+#         # We pre-select the source PPGs and RRs to avoid passing the huge main list to workers
+#         tasks = []
+#         for k in range(needed):
+#             source_idx = indices[k % current_count]
+#             src_ppg = ppg_list[source_idx]
+#             src_rr = rr_list[source_idx]
+            
+#             # Only augment PPG and Label
+#             aug_ppg = augment_ppg_segment(src_ppg)
+#             # aug_ppg = respiratory_aware_augmentation(src_ppg)
+#             aug_rr = copy.deepcopy(src_rr)
+            
+#             new_ppg_raw.append(aug_ppg)
+#             new_rr.append(aug_rr)
+#             # tasks.append((ppg_list[source_idx], rr_list[source_idx]))
+
+     
+#     # if len(new_ppg_raw) > 0:
+#     #     # Check if GPU available
+#     #     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+#     #     new_freq = process_cwt_on_gpu(new_ppg_raw, device=device)
+#     # else:
+#     #     new_freq = []
+#     # 4. Combine
+#     final_ppg = ppg_list + new_ppg_raw
+#     final_rr = rr_list + new_rr
+#     # final_freq = freq_list + new_freq
+    
+#     print(f"Balancing Complete. Added {len(new_ppg_raw)} synthetic samples.")
+#     print(f"Final Dataset Size: {len(final_ppg)}")
+    
+#     return final_ppg, final_rr, freq_list
+
+
+
+def balance_dataset_with_synthesis(ppg_list, breath_list):
     print("--- Starting Dataset Balancing (Parallelized) ---")
     
     # Ensure inputs are lists
     if isinstance(ppg_list, np.ndarray): ppg_list = list(ppg_list)
-    if isinstance(rr_list, np.ndarray): rr_list = list(rr_list)
-    if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
+    if isinstance(breath_list, np.ndarray): breath_list = list(breath_list)
 
     # 1. Organize Indices by Class
     class_indices = {0: [], 1: [], 2: [], 3: [], 4: []}
     
-    for i, rr in enumerate(rr_list):
-        mean_rr = np.mean(rr)
+    for i, rr in enumerate(breath_list):
+        # mean_rr = np.mean(rr)
+        mean_rr = breath_list[i][0]
         if mean_rr < 10: bin_idx = 0
         elif 10 <= mean_rr < 15: bin_idx = 1
         elif 15 <= mean_rr < 20: bin_idx = 2
@@ -1110,8 +1186,8 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
     print(f"Initial Counts: {counts}")
     print(f"Target per class: {target_count}")
     
-    new_ppg, new_rr, new_freq = [], [], []
-    new_ppg_raw = []
+    new_ppg, new_breath = [], []
+    
     # 3. Generate Data
     for bin_idx, indices in class_indices.items():
         current_count = len(indices)
@@ -1124,40 +1200,37 @@ def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
             
         print(f"Class {bin_idx}: Generating {needed} samples using {current_count} sources...")
 
-        # Prepare the list of source data to augment
-        # We pre-select the source PPGs and RRs to avoid passing the huge main list to workers
-        tasks = []
+        
         for k in range(needed):
             source_idx = indices[k % current_count]
             src_ppg = ppg_list[source_idx]
-            src_rr = rr_list[source_idx]
-            
+            src_breath = breath_list[source_idx]
+
             # Only augment PPG and Label
-            # aug_ppg = augment_ppg_segment(src_ppg)
-            aug_ppg = respiratory_aware_augmentation(src_ppg)
-            aug_rr = copy.deepcopy(src_rr)
-            
-            new_ppg_raw.append(aug_ppg)
-            new_rr.append(aug_rr)
+            aug_ppg = augment_ppg_segment(src_ppg)
+            # aug_ppg = respiratory_aware_augmentation(src_ppg)
+            aug_breath = copy.deepcopy(src_breath)
+
+            new_ppg.append(aug_ppg)
+            new_breath.append(aug_breath)
             # tasks.append((ppg_list[source_idx], rr_list[source_idx]))
 
      
-    if len(new_ppg_raw) > 0:
-        # Check if GPU available
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        new_freq = process_cwt_on_gpu(new_ppg_raw, device=device)
-    else:
-        new_freq = []
+    # if len(new_ppg_raw) > 0:
+    #     # Check if GPU available
+    #     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    #     new_freq = process_cwt_on_gpu(new_ppg_raw, device=device)
+    # else:
+    #     new_freq = []
     # 4. Combine
-    final_ppg = ppg_list + new_ppg_raw
-    final_rr = rr_list + new_rr
-    final_freq = freq_list + new_freq
+    final_ppg = ppg_list + new_ppg
+    final_breath = breath_list + new_breath
+    # final_freq = freq_list + new_freq
     
-    print(f"Balancing Complete. Added {len(new_ppg_raw)} synthetic samples.")
+    print(f"Balancing Complete. Added {len(new_ppg)} synthetic samples.")
     print(f"Final Dataset Size: {len(final_ppg)}")
     
-    return final_ppg, final_rr, final_freq
-
+    return final_ppg, final_breath
 
 def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
     """
@@ -1824,9 +1897,9 @@ def create_data_splits(cv_split, processed_data):
 
     # --- STEP 2: BALANCE DATASET ---
     #Now we pass the flattened lists.
-    # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis(
-    #     train_ppg, train_rr, train_freq
-    # )
+    train_ppg_bal, train_breath_bal = balance_dataset_with_synthesis(
+        train_ppg, train_breath
+    )
     # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis_fixed(
     #     train_ppg, train_rr, train_freq
     # )
@@ -1852,10 +1925,10 @@ def create_data_splits(cv_split, processed_data):
     logger.info(f"total number of subjects in this fold {id} is {len(train_subjects)+len(validation_subjects)+len(test_subjects)}")
     logger.info(f"number of train subjects is {len(train_subjects)}, number of val subjects is{len(validation_subjects)}, number of test subjects is{len(test_subjects)}")
     return {
-        'train_ppg': train_ppg,
+        'train_ppg': train_ppg_bal,
         'train_rr': train_rr,
         'train_freq': train_freq,
-        'train_breath': train_breath,
+        'train_breath': train_breath_bal,
         'train_ppg_ssl': train_ppg_ssl,
         'val_ppg': val_ppg,
         'val_rr': val_rr,
@@ -2716,7 +2789,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fine_tune_trainer = pl.Trainer(max_epochs=cfg.training.max_epochs,
                              accelerator="auto",
                              devices=cfg.hardware.devices,
-                             strategy='ddp_find_unused_parameters_true',
+                            #  strategy='ddp_find_unused_parameters_true',
                             #  detect_anomaly=True,
                              callbacks=callbacks,
                              logger=tblogger,
