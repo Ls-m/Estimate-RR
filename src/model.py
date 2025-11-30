@@ -1085,7 +1085,8 @@ class RRLightningModule(pl.LightningModule):
         if self.freq_model is not None:
             features.append(self.freq_model(freq))
 
-        z = torch.cat(features, dim=1)  # (B, fusion_dim)
+        # z = torch.cat(features, dim=1)  # (B, fusion_dim)
+        z = features[0]
         
         # out = self.head(z)  # (B,)
         # return out
