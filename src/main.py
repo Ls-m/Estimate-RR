@@ -1350,7 +1350,7 @@ def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
     def process_single(segment):
-        return generate_cwt_scalogram(segment, fs, use_fake=True)
+        return generate_cwt_scalogram(segment, fs, use_fake=False)
         # return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
