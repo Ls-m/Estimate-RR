@@ -312,4 +312,5 @@ class RWKVScalogramModel(nn.Module):
         # 5. Apply Head
         # out = self.head(seq_features)
         
-        return out.squeeze(-1)
+        # return out.squeeze(-1)
+        return out
