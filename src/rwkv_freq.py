@@ -237,17 +237,34 @@ class RWKVScalogramModel(nn.Module):
         #     nn.BatchNorm2d(64),
         #     nn.ReLU(),
         # )
+        # self.feature_extractor = nn.Sequential(
+        #     nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+        #     nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+        #     nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+        #     nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+        # )
         self.feature_extractor = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            nn.Conv2d(1, 32, kernel_size=(11, 11), stride=(1, 1), padding=(5, 5)),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
+
+            nn.Conv2d(32, 32, kernel_size=(7, 7), stride=(2, 1), padding=(3, 3)),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
+
+            nn.Conv2d(32, 64, kernel_size=(5, 3), stride=(1, 1), padding=(2, 1)),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+
+            nn.Conv2d(64, 64, kernel_size=(5, 3), stride=(2, 1), padding=(2, 1)),
             nn.BatchNorm2d(64),
             nn.ReLU(),
         )
@@ -255,7 +272,7 @@ class RWKVScalogramModel(nn.Module):
         # Channels are 64.
         # Total feature dimension = 32 * 64 = 2048.
         # We project this down to RWKV hidden size.
-        # self.bridge = nn.Linear(32 * 64, hidden_size)
+        self.bridge = nn.Linear(32 * 64, hidden_size)
 
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
@@ -294,7 +311,7 @@ class RWKVScalogramModel(nn.Module):
         features = features.reshape(B, T, C * F) # (B, 60, 2048)
         
         # Project to hidden size
-        # features = self.bridge(features) # (B, 60, Hidden)
+        features = self.bridge(features) # (B, 60, Hidden)
         
         # 4. Run RWKV
         seq_features = self.rwkv(features) 
