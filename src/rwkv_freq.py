@@ -255,7 +255,7 @@ class RWKVScalogramModel(nn.Module):
         # Channels are 64.
         # Total feature dimension = 32 * 64 = 2048.
         # We project this down to RWKV hidden size.
-        self.bridge = nn.Linear(32 * 64, hidden_size)
+        # self.bridge = nn.Linear(32 * 64, hidden_size)
 
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
@@ -294,7 +294,7 @@ class RWKVScalogramModel(nn.Module):
         features = features.reshape(B, T, C * F) # (B, 60, 2048)
         
         # Project to hidden size
-        features = self.bridge(features) # (B, 60, Hidden)
+        # features = self.bridge(features) # (B, 60, Hidden)
         
         # 4. Run RWKV
         seq_features = self.rwkv(features) 
