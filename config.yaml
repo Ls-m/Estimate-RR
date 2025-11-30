@@ -38,6 +38,8 @@ training:
   overlap: 57
   use_augmentation: False
   noise_std: 0.05
+  off_aug_time: False
+  off_aug_freq: True
 
 
 logging:

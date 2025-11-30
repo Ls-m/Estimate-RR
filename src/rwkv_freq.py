@@ -305,7 +305,11 @@ class RWKVScalogramModel(nn.Module):
             # We condense the whole 60s sequence into one vector for classification
             return torch.mean(seq_features, dim=1) # (B, Hidden)
         
+        window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
+
+        # Predict RR for the window
+        out = self.head(window_embedding)
         # 5. Apply Head
-        out = self.head(seq_features)
+        # out = self.head(seq_features)
         
         return out.squeeze(-1)

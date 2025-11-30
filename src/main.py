@@ -990,7 +990,7 @@ def process_cwt_on_gpu(ppg_list, device='cuda'):
 
 
 
-def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, freq_list):
+def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, breath_list, freq_list):
     """
     Balanced dataset generation with SCALOGRAM augmentation.
     
@@ -1005,18 +1005,28 @@ def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, freq_list):
     if isinstance(ppg_list, np.ndarray): ppg_list = list(ppg_list)
     if isinstance(rr_list, np.ndarray): rr_list = list(rr_list)
     if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
+    if isinstance(breath_list, np.ndarray): breath_list = list(breath_list)
 
     # 1. Organize Indices by RR Class (same as before)
     class_indices = {0: [], 1: [], 2: [], 3: [], 4: []}
-    
-    for i, rr in enumerate(rr_list):
-        mean_rr = np.mean(rr)
+
+    for i, rr in enumerate(breath_list):
+        mean_rr = breath_list[i][0]
         if mean_rr < 10: bin_idx = 0
         elif 10 <= mean_rr < 15: bin_idx = 1
         elif 15 <= mean_rr < 20: bin_idx = 2
         elif 20 <= mean_rr < 25: bin_idx = 3
         else: bin_idx = 4
         class_indices[bin_idx].append(i)
+    
+    # for i, rr in enumerate(rr_list):
+    #     mean_rr = np.mean(rr)
+    #     if mean_rr < 10: bin_idx = 0
+    #     elif 10 <= mean_rr < 15: bin_idx = 1
+    #     elif 15 <= mean_rr < 20: bin_idx = 2
+    #     elif 20 <= mean_rr < 25: bin_idx = 3
+    #     else: bin_idx = 4
+    #     class_indices[bin_idx].append(i)
 
     # 2. Find Majority Count
     counts = [len(idxs) for idxs in class_indices.values()]
@@ -1025,8 +1035,8 @@ def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, freq_list):
     print(f"Target per class: {target_count}")
     
     new_freq_aug = []  # <<< AUGMENTED SCALOGRAMS
-    new_rr = []        # <<< LABELS (UNCHANGED)
-    
+    new_breath = []        # <<< LABELS (UNCHANGED)
+
     # Initialize augmentor
     augmentor = ScalogramAugmentor(
         intensity_range=(0.85, 1.15),
@@ -1054,35 +1064,36 @@ def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, freq_list):
             
             # Get ORIGINAL scalogram and label
             src_freq = freq_list[source_idx]  # Shape: (128, 60)
-            src_rr = rr_list[source_idx]      # Shape: (60,)
-            
+            # src_rr = rr_list[source_idx]      # Shape: (60,)
+            src_breath = breath_list[source_idx]  # Shape: (60,)
+
             # AUGMENT THE SCALOGRAM (not the label)
             aug_freq = augmentor.augment(src_freq)
             
             # Label stays the same ✓
-            aug_rr = copy.deepcopy(src_rr)
-            
+            aug_breath = copy.deepcopy(src_breath)
+
             new_freq_aug.append(aug_freq)
-            new_rr.append(aug_rr)
+            new_breath.append(aug_breath)
 
     # 4. Combine Original + Augmented
     final_freq = freq_list + new_freq_aug
-    final_rr = rr_list + new_rr
+    final_breath = breath_list + new_breath
     final_ppg = ppg_list  # PPG is NOT augmented (no need)
     
     print(f"Balancing Complete.  Added {len(new_freq_aug)} synthetic samples.")
     print(f"Final Dataset Size: {len(final_freq)}")
     
     # VALIDATION: Check RR distribution is unchanged
-    original_means = np.array([np.mean(rr) for rr in rr_list])
-    augmented_means = np.array([np.mean(rr) for rr in final_rr])
-    
+    original_means = np.array([breath for breath in breath_list])
+    augmented_means = np.array([breath for breath in final_breath])
+
     print(f"\n--- RR Label Validation ---")
     print(f"Original RR mean: {original_means.mean():.2f} ± {original_means.std():.2f}")
     print(f"After augmentation: {augmented_means.mean():.2f} ± {augmented_means.std():.2f}")
     print(f"✓ Labels preserved (only scalograms augmented)\n")
-    
-    return final_ppg, final_rr, final_freq
+
+    return final_ppg, final_breath, final_freq
 
 # def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
 #     print("--- Starting Dataset Balancing (Parallelized) ---")
@@ -1827,7 +1838,7 @@ def create_folds(processed_data, n_splits=10, seed=42):
         })
     return cv_splits
 
-def create_data_splits(cv_split, processed_data):
+def create_data_splits(cfg, cv_split, processed_data):
 
     train_subjects = cv_split["train_subjects"]
     validation_subjects = cv_split["val_subjects"]
@@ -1897,12 +1908,19 @@ def create_data_splits(cv_split, processed_data):
 
     # --- STEP 2: BALANCE DATASET ---
     #Now we pass the flattened lists.
-    train_ppg_bal, train_breath_bal = balance_dataset_with_synthesis(
-        train_ppg, train_breath
-    )
-    # train_ppg_bal, train_rr_bal, train_freq_bal = balance_dataset_with_synthesis_fixed(
-    #     train_ppg, train_rr, train_freq
-    # )
+    if cfg.training.off_aug_time:
+        train_ppg_bal, train_breath_bal = balance_dataset_with_synthesis(
+            train_ppg, train_breath
+        )
+        train_freq_bal = train_freq
+    elif cfg.training.off_aug_freq:
+        train_ppg_bal, train_breath_bal, train_freq_bal = balance_dataset_with_synthesis_fixed(
+            train_ppg, train_rr, train_breath, train_freq
+        )
+    else:
+        train_ppg_bal = train_ppg
+        train_breath_bal = train_breath
+        train_freq_bal = train_freq
     val_ppg = np.concatenate(val_ppg_list, axis=0).tolist()
     val_rr = np.concatenate(val_rr_list, axis=0).tolist()
     val_freq = np.concatenate(val_freq_list, axis=0).tolist()
@@ -1927,7 +1945,7 @@ def create_data_splits(cv_split, processed_data):
     return {
         'train_ppg': train_ppg_bal,
         'train_rr': train_rr,
-        'train_freq': train_freq,
+        'train_freq': train_freq_bal,
         'train_breath': train_breath_bal,
         'train_ppg_ssl': train_ppg_ssl,
         'val_ppg': val_ppg,
@@ -2576,7 +2594,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fold_id = cv_split["fold_id"]
         logger.info(f"--- Starting Fold {fold_id} ---")
 
-        fold_data = create_data_splits(cv_split, processed_data)
+        fold_data = create_data_splits(cfg, cv_split, processed_data)
         # logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
         # analyze_fold_distribution_after_augmentation(fold_id, fold_data)
 
