@@ -61,7 +61,7 @@ class ScalogramAugmentor:
         #     'rotation'
         # ])
         
-        aug_type = 'freq_jitter'
+        aug_type = 'time_jitter'
 
         if aug_type == 'intensity':
             return self._intensity_augment(scalogram)
