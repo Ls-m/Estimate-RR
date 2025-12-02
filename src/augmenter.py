@@ -52,15 +52,17 @@ class ScalogramAugmentor:
             raise ValueError(f"Expected 2D scalogram, got shape {scalogram.shape}")
         
         # Randomly choose augmentation type
-        aug_type = np.random.choice([
-            'intensity',
-            'contrast',
-            'freq_jitter',
-            'time_jitter',
-            'blur',
-            'rotation'
-        ])
+        # aug_type = np.random.choice([
+        #     'intensity',
+        #     'contrast',
+        #     'freq_jitter',
+        #     'time_jitter',
+        #     'blur',
+        #     'rotation'
+        # ])
         
+        aug_type = 'intensity'
+
         if aug_type == 'intensity':
             return self._intensity_augment(scalogram)
         elif aug_type == 'contrast':
