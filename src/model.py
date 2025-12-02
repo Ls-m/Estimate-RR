@@ -1148,7 +1148,7 @@ class RRLightningModule(pl.LightningModule):
         # PL automatically creates 'val_mae' for callbacks from 'val/MAE'.
         # metrics = self.val_metrics(rr_pred, rr)
         metrics = self.val_metrics(rr_pred, breath)
-        self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
+        self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
         # --- End Fix 5 ---
         # STORE DATA FOR ANALYSIS (Return it to be collected at epoch end)
         output_data = {
