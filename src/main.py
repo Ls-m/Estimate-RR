@@ -1622,7 +1622,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # plot_cwt_scalogram(ppg_segments[0], original_rate)
         n_jobs = max(1, cpu_count() - 4)
         # logger.info(f"Compute frequency segments for subject {subject_id}")
-        # freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
+        freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
         # freq_segments = compute_freq_features(ppg_segments, original_rate)
         # check_freq_features(freq_segments, rr_segments, subject_id)
   
@@ -1643,16 +1643,16 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         #     normalization='per_column'  # CHANGED from quantile
         # )
         # logger.info(f"Computing CWT scalograms for subject {subject_id} using PyWavelets...")
-        freq_segments = compute_freq_features_pywt(
-            ppg_segments,
-            fs=original_rate,
-            num_scales=128,
-            fmin=0.1,
-            fmax=0.8,
-            target_time=60,
-            normalization='per_column',
-            n_jobs=n_jobs  # Adjust based on your CPU cores
-        )
+        # freq_segments = compute_freq_features_pywt(
+        #     ppg_segments,
+        #     fs=original_rate,
+        #     num_scales=128,
+        #     fmin=0.1,
+        #     fmax=0.8,
+        #     target_time=60,
+        #     normalization='per_column',
+        #     n_jobs=n_jobs  # Adjust based on your CPU cores
+        # )
 
         processed_data[subject_id] = (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl, breath_segments)
         # logger.info(f"processed data is {processed_data}")
