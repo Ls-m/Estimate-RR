@@ -61,7 +61,7 @@ class ScalogramAugmentor:
         #     'rotation'
         # ])
         
-        aug_type = 'blur'
+        aug_type = 'rotation'
 
         if aug_type == 'intensity':
             return self._intensity_augment(scalogram)
