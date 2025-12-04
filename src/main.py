@@ -1989,11 +1989,11 @@ class FirstBatchTimer(pl.Callback):
             self._epoch_start_time = None
 
 # def train_single_fold(fold_data, fold_id):
-def setup_callbacks(cfg,fold_id):
+def setup_callbacks(cfg,fold_id,logger):
     filename_prefix = f"best-checkpoint-fold{fold_id}-"
     checkpoint_callback = ModelCheckpoint(
         monitor='val/MAE',
-        dirpath=cfg.training.checkpoint_dir,
+        dirpath=os.path.join(logger.log_dir, cfg.training.checkpoint_dir),
         filename=filename_prefix + '{epoch:02d}-{val_mae:.2f}',
         save_top_k=1,
         save_last=True,
@@ -2807,14 +2807,14 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
          # --- The fine-tuning stage proceeds from here ---
         logger.info(f"[Fold {fold_id}] Starting Supervised Fine-tuning...")
-
-        callbacks = setup_callbacks(cfg, fold_id)
         # Setup logger
         tblogger = TensorBoardLogger(
             save_dir=cfg.logging.log_dir,
             name=cfg.logging.experiment_name,
             version=f'fold_{cv_split["fold_id"]}'
         )
+        callbacks = setup_callbacks(cfg, fold_id, tblogger)
+        
 
         profiler = SimpleProfiler(dirpath=f"profiles/fold_{fold_id}", filename="profiler_summary.txt")  # Saves to file
         ddp_strategy = DDPStrategy(find_unused_parameters=False)

@@ -1142,14 +1142,14 @@ class RRLightningModule(pl.LightningModule):
         
         # loss = self.criterion(rr_pred, rr)
         loss = self.criterion(rr_pred, breath)
-        self.log('val_loss', loss, on_step=True, on_epoch=False, prog_bar=False, batch_size=bs, sync_dist=True)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
 
         # --- FIX 5: Use torchmetrics ---
         # This is DDP-safe. It logs 'val/MAE' and 'val/MSE'.
         # PL automatically creates 'val_mae' for callbacks from 'val/MAE'.
         # metrics = self.val_metrics(rr_pred, rr)
         metrics = self.val_metrics(rr_pred, breath)
-        self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
+        self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs, sync_dist=True)
         # --- End Fix 5 ---
         # STORE DATA FOR ANALYSIS (Return it to be collected at epoch end)
         output_data = {
