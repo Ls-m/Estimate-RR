@@ -1,3 +1,5 @@
+seed: 42
+
 preprocessing:
   bandpass_filter:
     type: "butter"  # Type of bandpass filter: "butter", "cheby1", etc.
@@ -28,7 +30,7 @@ training:
   gradient_clip_val: 1.0 # Gradient clipping value
   n_freq_bins: 8 # Number of frequency bins for frequency-domain features
   pretrained_path: "pretrained_lstm_encoder.pth" # Path to save/load pretrained encoder weights
-  ablation_mode: time_only # Ablation mode options: ["fusion", "time_only", "freq_only"]
+  ablation_mode: freq_only # Ablation mode options: ["fusion", "time_only", "freq_only"]
   time_model_output_dim: 60
   freq_model_output_dim: 32
   use_ssl_pretraining: False  # Set to `true` to run SSL, `false` to train from scratch
