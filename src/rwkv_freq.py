@@ -218,7 +218,7 @@ class RWKV(nn.Module):
         # return x  # (batch_size, hidden_size)
 
 class RWKVScalogramModel(nn.Module):
-    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1):
+    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
         super().__init__()
         
         # --- 1. The "Eye" (Feature Extractor) ---
@@ -241,14 +241,14 @@ class RWKVScalogramModel(nn.Module):
             nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
+            nn.Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+            nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
             nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+            nn.BatchNorm2d(128),
             nn.ReLU(),
         )
         # self.feature_extractor = nn.Sequential(
@@ -272,7 +272,7 @@ class RWKVScalogramModel(nn.Module):
         # Channels are 64.
         # Total feature dimension = 32 * 64 = 2048.
         # We project this down to RWKV hidden size.
-        self.bridge = nn.Linear(32 * 64, hidden_size)
+        self.bridge = nn.Linear(32 * 128, hidden_size)
 
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
@@ -281,14 +281,24 @@ class RWKVScalogramModel(nn.Module):
             num_layers=num_layers, 
             dropout=dropout
         )
-        
-        # --- 3. The Head ---
-        self.head = nn.Sequential(
-            nn.Linear(hidden_size, 128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(128, output_size)
-        )
+        if mode == "freq_only":
+            # --- 3. The Head ---
+            self.head = nn.Sequential(
+                nn.Linear(hidden_size, 256),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(256, 32),
+                nn.ReLU(),
+                nn.Linear(32, output_size)
+            )
+        else:
+            self.head = nn.Sequential(
+                nn.Linear(hidden_size, 512),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(512, output_size),
+            )
+
 
     def forward(self, x, return_embedding=False):
         # Input x: (Batch, Freq=128, Time=60)
