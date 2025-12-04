@@ -3,7 +3,7 @@ import numpy as np
 import logging
 import torch
 from pytorch_lightning import LightningDataModule
-
+import random
 logger = logging.getLogger("Dataset")
 
 import torchaudio.transforms as T
@@ -11,6 +11,10 @@ import torchaudio.transforms as T
 
 import torch
 
+def worker_init_fn(worker_id):
+    seed = torch.initial_seed() % 2**32
+    np.random.seed(seed)
+    random.seed(seed)
 
 def make_balanced_sampler(rr_targets):
     """
@@ -192,15 +196,17 @@ class PPGRRDataModule(LightningDataModule):
             # sampler=sampler,      # <--- ADD THIS
             shuffle=True,        # <--- MUST BE FALSE when using sampler
             pin_memory=True,
-            persistent_workers=(self.num_workers > 0)
+            persistent_workers=(self.num_workers > 0),
+            worker_init_fn=worker_init_fn
+            
         )
         # return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, persistent_workers=True)
 
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True)
+        return torch.utils.data.DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True, worker_init_fn=worker_init_fn)
 
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True)
+        return torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True, worker_init_fn=worker_init_fn)
     
 
 

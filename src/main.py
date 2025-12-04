@@ -47,6 +47,17 @@ from debug3 import *
 from cwt2 import *
 
 logger = logging.getLogger("ReadData")
+
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    
+    # Makes cuDNN / MPS deterministic
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 def load_subjects_bidmc(path):
     if not os.path.exists(path):
         logger.error(f"Path does not exist: {path}")
@@ -2590,7 +2601,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
     
     all_fold_results = []
     for cv_split in cv_splits:
-
+        set_seed(cfg.seed + cv_split["fold_id"])
         fold_id = cv_split["fold_id"]
         logger.info(f"--- Starting Fold {fold_id} ---")
 
@@ -2839,6 +2850,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 
 @hydra.main(config_path="../", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
+    set_seed(cfg.seed)
     print(cfg)
     raw_data = read_data(cfg.data.path)
     
