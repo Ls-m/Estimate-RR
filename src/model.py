@@ -1026,7 +1026,8 @@ class RRLightningModule(pl.LightningModule):
                 hidden_size=1024,     # Internal vector size (try 128 or 256)
                 num_layers=2,        # Depth of the model
                 dropout=cfg.training.dropout,
-                output_size=cfg.training.freq_model_output_dim
+                output_size=cfg.training.freq_model_output_dim,
+                mode=cfg.training.ablation_mode
             )
             # self.freq_model = MambaScalogramModel()
             # self.freq_model = CNNTransformerRegressor(
