@@ -32,7 +32,7 @@ training:
   pretrained_path: "pretrained_lstm_encoder.pth" # Path to save/load pretrained encoder weights
   ablation_mode: freq_only # Ablation mode options: ["fusion", "time_only", "freq_only"]
   time_model_output_dim: 60
-  freq_model_output_dim: 32
+  freq_model_output_dim: 60
   use_ssl_pretraining: False  # Set to `true` to run SSL, `false` to train from scratch
   time_model_num_layers: 2
   dropout: 0.1
@@ -46,7 +46,7 @@ training:
 
 logging:
   log_dir: "logs" # Directory for logging
-  experiment_name: "RR_Estimation" # Name of the experiment for logging
+  experiment_name: "ourtest" # Name of the experiment for logging
 # Hardware Configuration
 hardware:
   devices: 1

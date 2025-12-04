@@ -218,7 +218,7 @@ class RWKV(nn.Module):
         # return x  # (batch_size, hidden_size)
 
 class RWKVScalogramModel(nn.Module):
-    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1):
+    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1):
         super().__init__()
         
         # --- 1. The "Eye" (Feature Extractor) ---
@@ -287,7 +287,7 @@ class RWKVScalogramModel(nn.Module):
             nn.Linear(hidden_size, 128),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(128, 1)
+            nn.Linear(128, output_size)
         )
 
     def forward(self, x, return_embedding=False):

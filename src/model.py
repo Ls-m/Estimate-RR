@@ -1025,7 +1025,8 @@ class RRLightningModule(pl.LightningModule):
             self.freq_model = RWKVScalogramModel(
                 hidden_size=1024,     # Internal vector size (try 128 or 256)
                 num_layers=2,        # Depth of the model
-                dropout=cfg.training.dropout
+                dropout=cfg.training.dropout,
+                output_size=cfg.training.freq_model_output_dim
             )
             # self.freq_model = MambaScalogramModel()
             # self.freq_model = CNNTransformerRegressor(
@@ -1056,11 +1057,15 @@ class RRLightningModule(pl.LightningModule):
                     print(f"Failed to load freq weights: {e}")
 
         
-        # self.head = nn.Sequential(
-        #     nn.Linear(fusion_dim, 128),
-        #     nn.ReLU(),
-        #     nn.Dropout(cfg.training.dropout),
-        #     nn.Linear(128, 60)
+        self.head = nn.Sequential(
+            nn.Linear(fusion_dim, 32),
+            nn.ReLU(),
+            nn.Dropout(cfg.training.dropout),
+            nn.Linear(32, 1)
+        )
+
+        # self.tail = nn.Sequential(
+        #     nn.Linear(fusion_dim, 1)
         # )
 
         if cfg.training.criterion == "MSELoss":
@@ -1085,12 +1090,12 @@ class RRLightningModule(pl.LightningModule):
         if self.freq_model is not None:
             features.append(self.freq_model(freq))
 
-        # z = torch.cat(features, dim=1)  # (B, fusion_dim)
-        z = features[0]
+        z = torch.cat(features, dim=1)  # (B, fusion_dim)
+        # z = features[0]
         
-        # out = self.head(z)  # (B,)
-        # return out
-        return z
+        out = self.head(z)  # (B,)
+        return out
+        # return z
         # return features
  
     
