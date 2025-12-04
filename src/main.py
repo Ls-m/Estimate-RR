@@ -1948,8 +1948,8 @@ def create_data_splits(cfg, cv_split, processed_data):
     # logger.info(f"val ppg shape: {val_ppg.shape}, val rr shape: {val_rr.shape}")
     # logger.info(f"test ppg shape: {test_ppg.shape}, test rr shape: {test_rr.shape}")
     id = cv_split["fold_id"]
-    logger.info(f"total number of segments in this fold {id} is {len(train_ppg)+len(val_ppg)+len(test_ppg)}")
-    logger.info(f"number of train segments is {len(train_ppg)}, number of val segments is{len(val_ppg)}, number of test segments is{len(test_ppg)}")
+    logger.info(f"total number of segments in this fold {id} is {len(train_ppg_bal)+len(val_ppg)+len(test_ppg)}")
+    logger.info(f"number of train segments is {len(train_ppg_bal)}, number of val segments is{len(val_ppg)}, number of test segments is{len(test_ppg)}")
 
     logger.info(f"total number of subjects in this fold {id} is {len(train_subjects)+len(validation_subjects)+len(test_subjects)}")
     logger.info(f"number of train subjects is {len(train_subjects)}, number of val subjects is{len(validation_subjects)}, number of test subjects is{len(test_subjects)}")
@@ -2608,8 +2608,11 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fold_data = create_data_splits(cfg, cv_split, processed_data)
         # logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
         # analyze_fold_distribution_after_augmentation(fold_id, fold_data)
+        if cfg.training.ablation_mode == 'freq_only':
+            train_dataset = PPGRRDataset(cfg,fold_data['train_freq'], fold_data['train_breath'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
+        else:
+            train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
 
-        train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
         val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'], fold_data['val_breath'], augment=False)
         test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'], fold_data['test_breath'], augment=False)
 
