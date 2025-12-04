@@ -1091,6 +1091,7 @@ class RRLightningModule(pl.LightningModule):
         # out = self.head(z)  # (B,)
         # return out
         return z
+        # return features
  
     
     def training_step(self, batch, batch_idx):
