@@ -1058,9 +1058,11 @@ class RRLightningModule(pl.LightningModule):
 
         
         self.head = nn.Sequential(
-            nn.Linear(fusion_dim, 32),
+            nn.Linear(fusion_dim, 128),
             nn.ReLU(),
             nn.Dropout(cfg.training.dropout),
+            nn.Linear(128, 32),
+            nn.ReLU(),
             nn.Linear(32, 1)
         )
 
