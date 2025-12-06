@@ -1100,28 +1100,29 @@ class RRLightningModule(pl.LightningModule):
     
 
     def forward(self, ppg, freq):
-        # features = []
-        # if self.time_model is not None:
-        #     features.append(self.time_model(ppg))
+        features = []
+        if self.time_model is not None:
+            features.append(self.time_model(ppg))
 
-        # if self.freq_model is not None:
-        #     features.append(self.freq_model(freq))
+        if self.freq_model is not None:
+            features.append(self.freq_model(freq))
 
-        # z = torch.cat(features, dim=1)  # (B, fusion_dim)
+        z = torch.cat(features, dim=1)  # (B, fusion_dim)
         # # z = features[0]
         
         # out = self.head(z)  # (B,)
         # return out
-        # return z
+        return z
         # return features
 
-        time_feat = self.time_model(ppg)    # (B,128)
-        freq_feat = self.freq_model(freq)   # (B,128)
+        # time_feat = self.time_model(ppg)    # (B,128)
+        
+        # freq_feat = self.freq_model(freq)   # (B,128)
 
-        fused = self.attn_fusion(time_feat, freq_feat)  # (B,128)
+        # fused = self.attn_fusion(time_feat, freq_feat)  # (B,128)
 
-        out = self.head(fused)
-        return out
+        # out = self.head(fused)
+        # return out
  
     
     def training_step(self, batch, batch_idx):
