@@ -931,6 +931,41 @@ class FusionAttention(nn.Module):
 
         fused = out.reshape(out.size(0), -1)   # (B, 2*128) = (B, 256)
         return fused
+
+class SymmetricCrossAttentionMerge(nn.Module):
+    def __init__(self, embed_dim=128, num_heads=8, dropout=0.1):
+        super().__init__()
+        self.mha1 = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
+        self.mha2 = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
+        
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x1, x2):
+        B = x1.shape[0]
+        
+        # Expand to (B, 1, D)
+        q1, q2 = x1.unsqueeze(1), x2.unsqueeze(1)
+        kv1, kv2 = q1, q2  # same for key/value
+
+        # x1 attends to x2
+        attn1, _ = self.mha1(q1, kv2, kv2, need_weights=False)
+        # x2 attends to x1
+        attn2, _ = self.mha2(q2, kv1, kv1, need_weights=False)
+
+        # Residual connections
+        out1 = self.norm1(x1 + self.dropout(attn1.squeeze(1)))
+        out2 = self.norm2(x2 + self.dropout(attn2.squeeze(1)))
+
+        # Final merge (you can choose: concat, add, gated add, etc.)
+        # merged = out1 + out2  # simple addition works very well
+        merged = torch.cat([out1, out2], dim=-1)
+        # or merged = torch.cat([out1, out2], dim=-1)  # → 256 dim
+
+        return merged
+
+
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
@@ -958,7 +993,7 @@ class RRLightningModule(pl.LightningModule):
         self.time_model = None
         self.freq_model = None
         fusion_dim = 0
-        self.attn_fusion = FusionAttention(embed_dim=128)
+        self.attn_fusion = SymmetricCrossAttentionMerge(embed_dim=128)
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
@@ -1100,29 +1135,29 @@ class RRLightningModule(pl.LightningModule):
     
 
     def forward(self, ppg, freq):
-        features = []
-        if self.time_model is not None:
-            features.append(self.time_model(ppg))
+        # features = []
+        # if self.time_model is not None:
+        #     features.append(self.time_model(ppg))
 
-        if self.freq_model is not None:
-            features.append(self.freq_model(freq))
+        # if self.freq_model is not None:
+        #     features.append(self.freq_model(freq))
 
-        z = torch.cat(features, dim=1)  # (B, fusion_dim)
+        # z = torch.cat(features, dim=1)  # (B, fusion_dim)
         # # z = features[0]
         
         # out = self.head(z)  # (B,)
         # return out
-        return z
+        # return z
         # return features
 
-        # time_feat = self.time_model(ppg)    # (B,128)
+        time_feat = self.time_model(ppg)    # (B,128)
         
-        # freq_feat = self.freq_model(freq)   # (B,128)
+        freq_feat = self.freq_model(freq)   # (B,128)
 
-        # fused = self.attn_fusion(time_feat, freq_feat)  # (B,128)
+        fused = self.attn_fusion(time_feat, freq_feat)  # (B,128)
 
-        # out = self.head(fused)
-        # return out
+        out = self.head(fused)
+        return out
  
     
     def training_step(self, batch, batch_idx):
