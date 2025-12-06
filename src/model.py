@@ -929,7 +929,7 @@ class FusionAttention(nn.Module):
         x = torch.stack([time_feat, freq_feat], dim=1)  # (B, 2, 128)
         out, _ = self.attn(x, x, x)                    # (B, 2, 128)
 
-        fused = out.mean(dim=1)                        # (B, 128)
+        fused = out.reshape(out.size(0), -1)   # (B, 2*128) = (B, 256)
         return fused
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):
