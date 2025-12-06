@@ -915,10 +915,10 @@ def augment_ppg_segment(ppg):
     if ppg.ndim != 1:
         raise ValueError(f"augment_ppg_segment expected 1D array, got {ppg.shape}")
 
-    aug_type = np.random.choice(['noise', 'drift', 'burst'])
+    # aug_type = np.random.choice(['noise', 'drift', 'burst'])
     scale = np.random.uniform(0.7, 1.3)
     ppg_aug = ppg * scale 
-    
+    aug_type = 'noise'
     if aug_type == 'noise':
         # Gaussian White Noise
         noise = np.random.normal(0, 0.05, len(ppg)) * np.std(ppg)
@@ -1361,7 +1361,7 @@ def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1
 def compute_freq_features(ppg_segments, fs, n_jobs=-1):  # -1 = all cores
     
     def process_single(segment):
-        return generate_cwt_scalogram(segment, fs, use_fake=False)
+        return generate_cwt_scalogram(segment, fs, use_fake=True)
         # return extract_cwt_features(segment, fs, num_scales=50)
     
     freq_features = Parallel(n_jobs=n_jobs)(
@@ -2611,7 +2611,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         if cfg.training.ablation_mode == 'freq_only':
             train_dataset = PPGRRDataset(cfg,fold_data['train_freq'], fold_data['train_breath'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
         else:
-            train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
+            train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_rr'], fold_data['train_ppg'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
 
         val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'], fold_data['val_breath'], augment=False)
         test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'], fold_data['test_breath'], augment=False)
