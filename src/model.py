@@ -917,6 +917,20 @@ class SequenceAwareRRLoss(nn.Module):
                      self.beta * smoothness_loss
         
         return total_loss
+    
+class FusionAttention(nn.Module):
+    def __init__(self, embed_dim=128, num_heads=4):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+
+    def forward(self, time_feat, freq_feat):
+        # time_feat, freq_feat: (B, 128)
+        
+        x = torch.stack([time_feat, freq_feat], dim=1)  # (B, 2, 128)
+        out, _ = self.attn(x, x, x)                    # (B, 2, 128)
+
+        fused = out.mean(dim=1)                        # (B, 128)
+        return fused
 class RRLightningModule(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
@@ -944,7 +958,7 @@ class RRLightningModule(pl.LightningModule):
         self.time_model = None
         self.freq_model = None
         fusion_dim = 0
-
+        self.attn_fusion = FusionAttention(embed_dim=128)
         if self.ablation_mode in ["fusion", "time_only"]:
             model_name = cfg.training.model_name
             if model_name == "Linear":
@@ -1086,20 +1100,28 @@ class RRLightningModule(pl.LightningModule):
     
 
     def forward(self, ppg, freq):
-        features = []
-        if self.time_model is not None:
-            features.append(self.time_model(ppg))
+        # features = []
+        # if self.time_model is not None:
+        #     features.append(self.time_model(ppg))
 
-        if self.freq_model is not None:
-            features.append(self.freq_model(freq))
+        # if self.freq_model is not None:
+        #     features.append(self.freq_model(freq))
 
-        z = torch.cat(features, dim=1)  # (B, fusion_dim)
-        # z = features[0]
+        # z = torch.cat(features, dim=1)  # (B, fusion_dim)
+        # # z = features[0]
         
-        out = self.head(z)  # (B,)
-        return out
+        # out = self.head(z)  # (B,)
+        # return out
         # return z
         # return features
+
+        time_feat = self.time_model(ppg)    # (B,128)
+        freq_feat = self.freq_model(freq)   # (B,128)
+
+        fused = self.attn_fusion(time_feat, freq_feat)  # (B,128)
+
+        out = self.head(fused)
+        return out
  
     
     def training_step(self, batch, batch_idx):
