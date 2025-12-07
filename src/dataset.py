@@ -182,7 +182,7 @@ class PPGRRDataModule(LightningDataModule):
 
     def train_dataloader(self):
         # Example: accessing labels directly from the stored list in dataset
-        train_labels = self.train_dataset.breath_data # Or whatever variable holds the Y targets
+        train_labels = np.array(self.train_dataset.breath_data).reshape(-1) # Or whatever variable holds the Y targets
         
         # # Calculate the mean RR for each 60-value segment
         # mean_rr_targets = [np.mean(segment) for segment in train_labels]
