@@ -300,7 +300,33 @@ class PositionalEncoding(nn. Module):
         """Add positional encoding to input."""
         x = x + self.pe[:, :x.size(1), :]
         return self.dropout(x)
-    
+class PositionalEncoding(nn.Module):
+    """Sinusoidal positional encoding (same interface as in many Transformer implementations)."""
+
+    def __init__(self, d_model: int, dropout: float = 0.0, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Create constant positional encoding matrix, shape (1, max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)  # (max_len, 1)
+        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(1, max_len, d_model, dtype=torch.float32)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe)   # not a parameter
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (B, T, D) where D == d_model
+        Returns:
+            x + positional_encoding, same shape
+        """
+        B, T, D = x.shape
+        if D != self.pe.size(2):
+            raise ValueError(f"PosEnc d_model ({self.pe.size(2)}) != input dim ({D})")
+        x = x + self.pe[:, :T, :].to(x.device)
+        return self.dropout(x)
 class RWKVScalogramModel(nn.Module):
     def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
         super().__init__()
@@ -357,7 +383,7 @@ class RWKVScalogramModel(nn.Module):
         # Total feature dimension = 32 * 64 = 2048.
         # We project this down to RWKV hidden size.
         self.bridge = nn.Linear(32 * 128, hidden_size)
-
+        self.pos_encoder = PositionalEncoding(hidden_size, dropout=0.0, max_len=max_seq_len)
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
             input_size=hidden_size, 
@@ -407,7 +433,9 @@ class RWKVScalogramModel(nn.Module):
         
         # Project to hidden size
         features = self.bridge(features) # (B, 60, Hidden)
-        
+        # ---- ADD POSITIONAL ENCODING HERE ----
+        features = self.pos_encoder(features)   # still (B, T, hidden_size)
+
         # 4. Run RWKV
         seq_features = self.rwkv(features) 
 
