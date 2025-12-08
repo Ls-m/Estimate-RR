@@ -45,6 +45,8 @@ from cwt_generator import *
 from debug2 import *
 from debug3 import *
 from cwt2 import *
+import scipy.io as sio
+import h5py
 
 logger = logging.getLogger("ReadData")
 
@@ -170,6 +172,110 @@ def read_data(path):
             # print(raw_data)
     return raw_data
 
+def load_subjects_capnobaseMat(path):
+    if not os.path.exists(path):
+        logger.error(f"Path does not exist: {path}")
+        return None
+    subjects = []
+    
+    for file_name in os.listdir(path):
+        if not file_name.endswith(".mat"):
+            continue
+        
+        subject_id = file_name.split("_")[0]
+        if subject_id not in subjects:
+            subjects.append(subject_id)
+    return subjects
+def load_files_capnobaseMat(path,subjects):
+    print(f"subjects are {subjects}")
+    raw_data = {}
+    min_RR = float("inf")
+    min_subject = []
+    for subject in subjects:
+        file = path +'/' + subject +"_8min.mat"
+        with h5py.File(file, "r") as f:
+        
+            print(list(f.keys()))
+            print(list(f['labels'].keys()))
+            print(list(f['labels']['co2'].keys()))
+            print(list(f['labels']['co2']['startinsp'].keys()))
+            print(list(f['labels']['co2']['startinsp']['x']))
+            print(list(f['labels']['co2']['startexp'].keys()))
+            print(list(f['labels']['co2']['startexp']['x']))
+            print(list(f['param']['samplingrate']['pleth']))
+            print(list(f['#refs#'].keys()))
+            print(list(f['#refs#']['a']))
+            print(list(f['reference'].keys()))
+            print(list(f['reference']['rr'].keys()))
+            print(list(f['reference']['rr']['co2'].keys()))
+            print(list(f['reference']['rr']['co2']['x']))
+            print(list(f['reference']['rr']['co2']['y']))
+            print(list(f['reference']['units']['rr']['y']))
+            print(list(f['signal'].keys()))
+            print(list(f['signal']['pleth']['y']))
+            exit()
+        signal_file = path+"/bidmc_"+subject+"_Signals.csv"
+        numeric_file = path+"/bidmc_"+subject+"_Numerics.csv"
+        breath_file = path+"/bidmc_"+subject+"_Breaths.csv"
+
+        signal_df = pd.read_csv(signal_file) if os.path.exists(signal_file) else None
+        numeric_df = pd.read_csv(numeric_file) if os.path.exists(numeric_file) else None
+        breath_df = pd.read_csv(breath_file) if os.path.exists(breath_file) else None
+        signal_df.columns = signal_df.columns.str.strip()
+        numeric_df.columns = numeric_df.columns.str.strip()
+        breath_df.columns = breath_df.columns.str.strip()
+
+        for col in signal_df.columns:
+            signal_df[col] = pd.to_numeric(signal_df[col], errors='coerce')
+        
+        for col in numeric_df.columns:
+            numeric_df[col] = pd.to_numeric(numeric_df[col], errors='coerce')
+        for col in breath_df.columns:
+            breath_df[col] = pd.to_numeric(breath_df[col], errors='coerce')
+
+        
+
+        ppg = signal_df["PLETH"].values
+        rr = numeric_df["RESP"].values
+        breath = breath_df[["breaths ann1 [signal sample no]", "breaths ann2 [signal sample no]"]].mean(axis=1, skipna=True).values
+        min_RR = min(min_RR, np.nanmin(rr))
+        if np.nanmin(rr) == 0:
+            min_subject.append(subject)
+        if np.any(np.isnan(ppg)) or np.any(np.isinf(ppg)):
+            logger.info(f"PPG data contains NaN or Inf values for subject: {subject}")
+
+        if np.any(np.isnan(rr)) or np.any(np.isinf(rr)):
+            logger.info(f"RR data contains NaN or Inf values for subject: {subject}")
+
+        if np.any(np.isnan(breath)) or np.any(np.isinf(breath)):
+            logger.info(f"Breath data contains NaN or Inf values for subject: {subject}")
+        
+        raw_data[subject] = (ppg, rr, breath)
+
+    logger.info(f"Minimum RR subjects for bidmc dataset: {min_subject}")
+    logger.info(f"Minimum RR for bidmc dataset: {min_RR}")
+    for subject, (ppg, rr, breath) in raw_data.items():
+        logger.debug(f"for subject {subject} PPG length: {len(ppg)}, RR length: {len(rr)}, Breath length: {len(breath)}")
+
+    return raw_data
+def read_data_capnobaseMat(path):
+    # Code to read data goes here
+    raw_data = {}
+    for dataset_name in os.listdir(path):
+        dataset_path = os.path.join(path,dataset_name)
+        if not os.path.isdir(dataset_path):
+            continue
+        if dataset_name == "capnobase":
+            
+            subjects = load_subjects_capnobaseMat(os.path.join(dataset_path,"data/mat"))
+            print(subjects)
+            raw_data = load_files_capnobaseMat(os.path.join(dataset_path,"data/mat"), subjects)
+            # print(raw_data)
+            print(len(subjects))
+            
+            break
+            # print(raw_data)
+    return raw_data
 
 def read_capnobase_data(path):
     raw_data = {}
@@ -748,7 +854,8 @@ def create_segments_simple(subject_id, ppg_signal, rr_labels, breath, ppg_fs, rr
         # # Optional: normalize each segment
         # ppg_segment_norm = (ppg_segment - np.mean(ppg_segment)) / (np.std(ppg_segment) + 1e-8)
         ppg_segment_norm = normalize_signal(ppg_segment)
-        ppg_segments.append(ppg_segment_norm)
+        # ppg_segments.append(ppg_segment_norm)
+        ppg_segments.append(ppg_segment)
         rr_segments.append(np.array([rr_slice[-1]]))
         # rr_segments.append(np.array([np.mean(rr_slice)]))
         breath_segments.append([np.float64((len(breath_slice)*60)/window_size_sec)])
@@ -2855,6 +2962,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 def main(cfg: DictConfig):
     set_seed(cfg.seed)
     print(cfg)
+    # read_data_capnobaseMat(cfg.data.path)
     raw_data = read_data(cfg.data.path)
     
     # print(raw_data['07'][1])
