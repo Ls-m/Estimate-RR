@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
+import math
 
 class RWKVBlock(nn.Module):
     """Single RWKV block with time mixing and channel mixing."""
@@ -216,7 +217,90 @@ class RWKV(nn.Module):
         # Return final representation (last time step) - SAME AS YOUR ORIGINAL
         return x  # Shape: (Batch, Time, Hidden_Size)
         # return x  # (batch_size, hidden_size)
+class BaseSequenceModel(nn.Module):
+    """Base class for all sequence models.  All models must implement forward()."""
+    
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int, dropout: float):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self. dropout = dropout
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Input tensor of shape (Batch, Time, Features)
+        Returns:
+            Output tensor of shape (Batch, Time, Hidden_Size)
+        """
+        raise NotImplementedError
+class TransformerModel(BaseSequenceModel):
+    """Transformer encoder for time series."""
+    
+    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2,
+                 dropout: float = 0.1, nhead: int = 8):
+        super().__init__(input_size, hidden_size, num_layers, dropout)
+        
+        self.nhead = nhead
+        
+        # Input projection
+        self.input_proj = nn.Linear(input_size, hidden_size)
+        
+        # Positional encoding
+        self.pos_encoder = PositionalEncoding(hidden_size, dropout)
+        
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_size,
+            nhead=nhead,
+            dim_feedforward=hidden_size * 4,
+            dropout=dropout,
+            batch_first=True,
+            activation='gelu'
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # Output layer norm
+        self.ln_out = nn.LayerNorm(hidden_size)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through Transformer."""
+        # Input projection
+        x = self.input_proj(x)
+        
+        # Add positional encoding
+        x = self.pos_encoder(x)
+        
+        # Transformer encoding
+        x = self.transformer(x)
+        
+        # Output normalization
+        x = self.ln_out(x)
+        
+        return x  # (Batch, Time, Hidden_Size)
 
+
+class PositionalEncoding(nn. Module):
+    """Sinusoidal positional encoding."""
+    
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        
+        # Create positional encoding matrix
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch. exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(1, max_len, d_model)
+        pe[0, :, 0::2] = torch.sin(position * div_term)
+        pe[0, :, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Add positional encoding to input."""
+        x = x + self.pe[:, :x.size(1), :]
+        return self.dropout(x)
+    
 class RWKVScalogramModel(nn.Module):
     def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
         super().__init__()
@@ -275,21 +359,22 @@ class RWKVScalogramModel(nn.Module):
         self.bridge = nn.Linear(32 * 128, hidden_size)
 
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
-        self.rwkv = RWKV(
-            input_size=hidden_size, 
-            hidden_size=hidden_size, 
-            num_layers=num_layers, 
-            dropout=dropout
-        )
+        # self.rwkv = RWKV(
+        #     input_size=hidden_size, 
+        #     hidden_size=hidden_size, 
+        #     num_layers=num_layers, 
+        #     dropout=dropout
+        # )
+        self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
         if mode == "freq_only":
             # --- 3. The Head ---
             self.head = nn.Sequential(
-                nn.Linear(hidden_size, 256),
+                nn.Linear(hidden_size, 512),
                 nn.ReLU(),
                 nn.Dropout(dropout),
-                nn.Linear(256, 32),
+                nn.Linear(512, 128),
                 nn.ReLU(),
-                nn.Linear(32, output_size)
+                nn.Linear(128, output_size)
             )
         else:
             self.head = nn.Sequential(
