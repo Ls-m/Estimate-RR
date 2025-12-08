@@ -383,7 +383,7 @@ class RWKVScalogramModel(nn.Module):
         # Total feature dimension = 32 * 64 = 2048.
         # We project this down to RWKV hidden size.
         self.bridge = nn.Linear(32 * 128, hidden_size)
-        self.pos_encoder = PositionalEncoding(hidden_size, dropout=0.0, max_len=max_seq_len)
+        self.pos_encoder = PositionalEncoding(hidden_size, dropout=0.0, max_len=256)
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
             input_size=hidden_size, 
