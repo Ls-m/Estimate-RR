@@ -47,6 +47,7 @@ from debug3 import *
 from cwt2 import *
 import scipy.io as sio
 import h5py
+from scipy.signal import resample_poly
 
 logger = logging.getLogger("ReadData")
 
@@ -105,6 +106,7 @@ def load_files_bidmc(path,subjects):
 
         ppg = signal_df["PLETH"].values
         rr = numeric_df["RESP"].values
+        
         breath = breath_df[["breaths ann1 [signal sample no]", "breaths ann2 [signal sample no]"]].mean(axis=1, skipna=True).values
         min_RR = min(min_RR, np.nanmin(rr))
         if np.nanmin(rr) == 0:
@@ -195,69 +197,22 @@ def load_files_capnobaseMat(path,subjects):
         file = path +'/' + subject +"_8min.mat"
         with h5py.File(file, "r") as f:
         
-            print(list(f.keys()))
-            print(list(f['labels'].keys()))
-            print(list(f['labels']['co2'].keys()))
-            print(list(f['labels']['co2']['startinsp'].keys()))
-            print(list(f['labels']['co2']['startinsp']['x']))
-            print(list(f['labels']['co2']['startexp'].keys()))
-            print(list(f['labels']['co2']['startexp']['x']))
-            print(list(f['param']['samplingrate']['pleth']))
-            print(list(f['#refs#'].keys()))
-            print(list(f['#refs#']['a']))
-            print(list(f['reference'].keys()))
-            print(list(f['reference']['rr'].keys()))
-            print(list(f['reference']['rr']['co2'].keys()))
-            print(list(f['reference']['rr']['co2']['x']))
-            print(list(f['reference']['rr']['co2']['y']))
-            print(list(f['reference']['units']['rr']['y']))
-            print(list(f['signal'].keys()))
-            print(list(f['signal']['pleth']['y']))
-            exit()
-        signal_file = path+"/bidmc_"+subject+"_Signals.csv"
-        numeric_file = path+"/bidmc_"+subject+"_Numerics.csv"
-        breath_file = path+"/bidmc_"+subject+"_Breaths.csv"
+            signal_file = f['signal']['pleth']['y'][()]
+            breath_file = f['labels']['co2']['startexp']['x'][()]
 
-        signal_df = pd.read_csv(signal_file) if os.path.exists(signal_file) else None
-        numeric_df = pd.read_csv(numeric_file) if os.path.exists(numeric_file) else None
-        breath_df = pd.read_csv(breath_file) if os.path.exists(breath_file) else None
-        signal_df.columns = signal_df.columns.str.strip()
-        numeric_df.columns = numeric_df.columns.str.strip()
-        breath_df.columns = breath_df.columns.str.strip()
+            ppg = signal_file[0]
+            breath = breath_file.squeeze()
+            print(ppg)
+            
+            if np.any(np.isnan(ppg)) or np.any(np.isinf(ppg)):
+                logger.info(f"PPG data contains NaN or Inf values for subject: {subject}")
 
-        for col in signal_df.columns:
-            signal_df[col] = pd.to_numeric(signal_df[col], errors='coerce')
-        
-        for col in numeric_df.columns:
-            numeric_df[col] = pd.to_numeric(numeric_df[col], errors='coerce')
-        for col in breath_df.columns:
-            breath_df[col] = pd.to_numeric(breath_df[col], errors='coerce')
-
-        
-
-        ppg = signal_df["PLETH"].values
-        rr = numeric_df["RESP"].values
-        breath = breath_df[["breaths ann1 [signal sample no]", "breaths ann2 [signal sample no]"]].mean(axis=1, skipna=True).values
-        min_RR = min(min_RR, np.nanmin(rr))
-        if np.nanmin(rr) == 0:
-            min_subject.append(subject)
-        if np.any(np.isnan(ppg)) or np.any(np.isinf(ppg)):
-            logger.info(f"PPG data contains NaN or Inf values for subject: {subject}")
-
-        if np.any(np.isnan(rr)) or np.any(np.isinf(rr)):
-            logger.info(f"RR data contains NaN or Inf values for subject: {subject}")
-
-        if np.any(np.isnan(breath)) or np.any(np.isinf(breath)):
-            logger.info(f"Breath data contains NaN or Inf values for subject: {subject}")
-        
-        raw_data[subject] = (ppg, rr, breath)
-
-    logger.info(f"Minimum RR subjects for bidmc dataset: {min_subject}")
-    logger.info(f"Minimum RR for bidmc dataset: {min_RR}")
-    for subject, (ppg, rr, breath) in raw_data.items():
-        logger.debug(f"for subject {subject} PPG length: {len(ppg)}, RR length: {len(rr)}, Breath length: {len(breath)}")
-
+            # --- Downsample PPG from 300 Hz → 125 Hz ---
+            ppg_down = resample_poly(ppg, up=5, down=12)
+            breath_down = breath * (125.0 / 300.0)
+            raw_data[subject] = (ppg_down, breath_down)      
     return raw_data
+
 def read_data_capnobaseMat(path):
     # Code to read data goes here
     raw_data = {}
@@ -854,8 +809,8 @@ def create_segments_simple(subject_id, ppg_signal, rr_labels, breath, ppg_fs, rr
         # # Optional: normalize each segment
         # ppg_segment_norm = (ppg_segment - np.mean(ppg_segment)) / (np.std(ppg_segment) + 1e-8)
         ppg_segment_norm = normalize_signal(ppg_segment)
-        # ppg_segments.append(ppg_segment_norm)
-        ppg_segments.append(ppg_segment)
+        ppg_segments.append(ppg_segment_norm)
+        # ppg_segments.append(ppg_segment)
         rr_segments.append(np.array([rr_slice[-1]]))
         # rr_segments.append(np.array([np.mean(rr_slice)]))
         breath_segments.append([np.float64((len(breath_slice)*60)/window_size_sec)])
@@ -1639,23 +1594,23 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
     if device == 'cpu':
         logger.warning("GPU not available. Preprocessing will be slow.")
     # for subject_data in raw_data:
-    for i in range(1,len(raw_data)+1):
+    for subject in raw_data.keys():
         # Example processing: normalize PPG and RR signals
         # if i==13:
         #     continue
-        ppg = raw_data[f"{i:02}"][0]
-        rr = raw_data[f"{i:02}"][1]
-        breath = raw_data[f"{i:02}"][2]
-
+        ppg = raw_data[subject][0]
+        rr = raw_data[subject][1]
+        breath = raw_data[subject][2]
+        
         if dataset_name == "bidmc":
             original_rate = 125
 
         check_effect = False
         
         if cfg.preprocessing.use_denoiser:
-            logger.info(f"Subject {i:02}: Running with denoiser ENABLED.")
+            logger.info(f"Subject {subject}: Running with denoiser ENABLED.")
             if cfg.preprocessing.use_edpa:
-                logger.info(f"Subject {i:02}: Running with EDPA denoising ENABLED.")
+                logger.info(f"Subject {subject}: Running with EDPA denoising ENABLED.")
                 _, merged_segments = edpa_denoiser(ppg, original_rate, check_effect=check_effect)
                 if merged_segments:
                     ppg_reconstructed, segments_to_remove = reconstruct_noise(ppg, merged_segments, original_rate)
@@ -1663,12 +1618,12 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
                     ppg_denoised = apply_removals(ppg_reconstructed, expanded_removed_segments)
                     rr_labels_denoised = remove_corresponding_labels(rr, expanded_removed_segments, original_rate, 1)
                 else:
-                    logger.info(f"for this subject {i} there is no noise detected!")
+                    logger.info(f"for this subject {subject} there is no noise detected!")
                     expanded_removed_segments = []
                     ppg_denoised = ppg
                     rr_labels_denoised = rr
             elif cfg.preprocessing.use_wavelet_denoising:
-                logger.info(f"Subject {i:02}: Running with wavelet denoising ENABLED.")
+                logger.info(f"Subject {subject}: Running with wavelet denoising ENABLED.")
                 ppg_denoised = denoise_ppg_with_wavelet(ppg)
                 rr_labels_denoised = rr
                 expanded_removed_segments = []
@@ -1689,7 +1644,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
                 # plt.show()
         else:
             # This is the ablation path: the denoiser is skipped entirely.
-            logger.info(f"Subject {i:02}: Running with denoiser DISABLED (Ablation Study).")
+            logger.info(f"Subject {subject}: Running with denoiser DISABLED (Ablation Study).")
             ppg_denoised = ppg
             rr_labels_denoised = rr
             expanded_removed_segments = []
@@ -1711,7 +1666,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         # ppg_normalized = normalize_signal(ppg_cliped)
         # check_normalization_effect(ppg_cliped, ppg_normalized, original_rate)
 
-        subject_id = f"{i:02}"
+        subject_id = subject
 
 
         if cfg.preprocessing.use_denoiser and cfg.preprocessing.use_edpa:
@@ -1956,7 +1911,7 @@ def create_folds(processed_data, n_splits=10, seed=42):
         })
     return cv_splits
 
-def create_data_splits(cfg, cv_split, processed_data):
+def create_data_splits(cfg, cv_split, processed_data, processed_data_capnobase):
 
     train_subjects = cv_split["train_subjects"]
     validation_subjects = cv_split["val_subjects"]
@@ -1979,7 +1934,13 @@ def create_data_splits(cfg, cv_split, processed_data):
             train_breath_list.append(processed_data[train_subject][4])
         else:
             logger.warning(f"Train subject {train_subject} not found in processed data.")
-    
+    if processed_data_capnobase:
+        for subject in processed_data_capnobase.keys():
+            train_ppg_list.append(processed_data_capnobase[subject][0])
+            train_rr_list.append(processed_data_capnobase[subject][1])
+            train_freq_list.append(processed_data_capnobase[subject][2])
+            train_ppg_ssl_list.append(processed_data_capnobase[subject][3])
+            train_breath_list.append(processed_data_capnobase[subject][4])
     val_ppg_list = []
     val_rr_list = []
     val_freq_list = []
@@ -2702,7 +2663,7 @@ def analyze_fold_distribution_after_augmentation(fold_id, fold_data):
     print("="*70 + "\n")
     
 
-def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
+def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_data_capnobase):
 
     # analyze_fold_distribution(cv_splits, processed_data)
     
@@ -2712,7 +2673,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
         fold_id = cv_split["fold_id"]
         logger.info(f"--- Starting Fold {fold_id} ---")
 
-        fold_data = create_data_splits(cfg, cv_split, processed_data)
+        fold_data = create_data_splits(cfg, cv_split, processed_data, processed_data_capnobase)
         # logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
         # analyze_fold_distribution_after_augmentation(fold_id, fold_data)
         if cfg.training.ablation_mode == 'freq_only':
@@ -2962,17 +2923,51 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl):
 def main(cfg: DictConfig):
     set_seed(cfg.seed)
     print(cfg)
-    # read_data_capnobaseMat(cfg.data.path)
     raw_data = read_data(cfg.data.path)
     
+    # if cfg.training.use_capno:
+    #     raw_data_capnobase = read_data_capnobaseMat(cfg.data.path)
+    #     rr_temp = None
+    #     for _, (_, rr, _) in raw_data.items():
+    #         if rr is not None:
+    #             rr_temp = rr
+    #             break
+    #     combined = {}
+
+    #     # Add capno subjects
+    #     for subject, (ppg, breath) in raw_data_capnobase.items():
+    #         combined[f"capno_{subject}"] = (ppg, rr_temp, breath)
+
+    #     # Add bidmc subjects
+    #     for subject, (ppg, rr, breath) in raw_data.items():
+    #         combined[f"bidmc_{subject}"] = (ppg, rr, breath)
+    # else:
+    #     combined = raw_data
     # print(raw_data['07'][1])
     # exit()
+    print(raw_data.keys())
+    print(len(raw_data.keys()))
     processed_data = process_data(cfg, raw_data)
 
 
     print(f"processed data length: {len(processed_data)}")
     print(f"processed data for subjects")
     
+    processed_data_capnobase = None
+    if cfg.training.use_capno:
+        raw_data_capnobase = read_data_capnobaseMat(cfg.data.path)
+        rr_temp = None
+        for _, (_, rr, _) in raw_data.items():
+            if rr is not None:
+                rr_temp = rr
+                break
+        combined = {}
+
+        # Add capno subjects
+        for subject, (ppg, breath) in raw_data_capnobase.items():
+            combined[f"capno_{subject}"] = (ppg, rr_temp, breath)
+        processed_data_capnobase = process_data(cfg, combined)
+
     count_zero = 0
     segment_counts = {}
     for subject_id, (ppg_segments, rr_segments, freq_segments, ppg_segments_ssl, breath_segments) in processed_data.items():
@@ -2983,7 +2978,7 @@ def main(cfg: DictConfig):
 
     print(segment_counts)
     logger.info(f"number of subjects with zero segments is: {count_zero}")
-
+    
     # min_len = min(segment_counts.values())
     # logger.info(f"minimum number of segments across subjects: {min_len}")
     
@@ -3143,7 +3138,7 @@ def main(cfg: DictConfig):
     print(f"🧩 Missing subjects in test folds: {missing_subjects if missing_subjects else 'None'}")
     print(f"⚠️ Unexpected subjects: {extra_subjects if extra_subjects else 'None'}")
 
-    all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl)
+    all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_data_capnobase)
     
     for fold_result in all_fold_results:
         logger.info(f"Fold {fold_result['fold_id']} test results: {fold_result['test_results']}")
