@@ -359,13 +359,13 @@ class RWKVScalogramModel(nn.Module):
         self.bridge = nn.Linear(32 * 128, hidden_size)
 
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
-        # self.rwkv = RWKV(
-        #     input_size=hidden_size, 
-        #     hidden_size=hidden_size, 
-        #     num_layers=num_layers, 
-        #     dropout=dropout
-        # )
-        self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
+        self.rwkv = RWKV(
+            input_size=hidden_size, 
+            hidden_size=hidden_size, 
+            num_layers=num_layers, 
+            dropout=dropout
+        )
+        # self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
         if mode == "freq_only":
             # --- 3. The Head ---
             self.head = nn.Sequential(
