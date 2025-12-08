@@ -182,19 +182,19 @@ class PPGRRDataModule(LightningDataModule):
 
     def train_dataloader(self):
         # Example: accessing labels directly from the stored list in dataset
-        train_labels = np.array(self.train_dataset.breath_data).reshape(-1) # Or whatever variable holds the Y targets
+        # train_labels = np.array(self.train_dataset.breath_data).reshape(-1) # Or whatever variable holds the Y targets
         
         # # Calculate the mean RR for each 60-value segment
         # mean_rr_targets = [np.mean(segment) for segment in train_labels]
         # # 2. Create the sampler
-        sampler = make_balanced_sampler(train_labels)
+        # sampler = make_balanced_sampler(train_labels)
 
         return torch.utils.data.DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            sampler=sampler,      # <--- ADD THIS
-            shuffle=False,        # <--- MUST BE FALSE when using sampler
+            # sampler=sampler,      # <--- ADD THIS
+            shuffle=True,        # <--- MUST BE FALSE when using sampler
             pin_memory=True,
             persistent_workers=(self.num_workers > 0),
             worker_init_fn=worker_init_fn
