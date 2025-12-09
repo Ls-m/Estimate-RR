@@ -1516,10 +1516,12 @@ class ProjectionHead(nn.Module):
 
 class SSLModel(pl.LightningModule):
 
-    def __init__(self, encoder: nn.Module, proj_dim=128, hidden_dim=256):
+    def __init__(self, encoder: nn.Module, proj_dim=128, hidden_dim=256, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
         super().__init__()
         self.save_hyperparameters()
-
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.temperature = temperature
         self.encoder = encoder
         self.proj = ProjectionHead(encoder.rwkv.hidden_size, proj_dim, hidden_dim)
         self.augment = ScalogramAugment(
@@ -1539,34 +1541,7 @@ class SSLModel(pl.LightningModule):
         z1 = F.normalize(z1, dim=-1)
         z2 = F.normalize(z2, dim=-1)
         return z1, z2
-    
-    def _shared_step(self, batch):
-        """
-        A shared step for training, validation, and testing to avoid code duplication.
-        """
-        # In SSL, we only need the PPG signal from the batch
-        ppg, _, _ = batch
 
-        # Create two augmented views of the input PPG
-        # NOTE: It's important that augmentation is applied here to get different views
-        # even for the validation and test sets.
-        view1 = ppg_augmentation(ppg)
-        view2 = ppg_augmentation(ppg)
-
-        # Get embeddings from the encoder
-        h1 = self.encoder(view1)
-        h2 = self.encoder(view2)
-
-        # Get projections from the projection head
-        z1 = self.projection_head(h1)
-        z2 = self.projection_head(h2)
-
-        # Concatenate projections for loss calculation
-        features = torch.cat([z1, z2], dim=0)
-
-        # Calculate contrastive loss
-        loss = self.info_nce_loss(features, self.hparams.temperature)
-        return loss
     
     def info_nce_loss(self, z1, z2, temperature=0.1):
         # z1, z2: (B, D) normalized
@@ -1592,7 +1567,7 @@ class SSLModel(pl.LightningModule):
         x1 = self.augment(x)
         x2 = self.augment(x)
         z1, z2 = self(x1, x2)
-        loss = self.info_nce_loss(z1, z2, temperature=0.1)
+        loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
 
         return loss
 
@@ -1611,8 +1586,8 @@ class SSLModel(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
             self.parameters(),
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
