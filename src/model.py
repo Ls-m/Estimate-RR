@@ -1571,17 +1571,27 @@ class SSLModel(pl.LightningModule):
 
         return loss
 
-    # def validation_step(self, batch, batch_idx):
-    #     loss = self._shared_step(batch)
-    #     # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
-    #     self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
-    #     return loss
+    def validation_step(self, batch, batch_idx):
+        ppg, rr, freq, breath = batch
+        x = freq
+        x1 = self.augment(x)
+        x2 = self.augment(x)
+        z1, z2 = self(x1, x2)
+        loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
 
-    # def test_step(self, batch, batch_idx):
-    #     loss = self._shared_step(batch)
-    #     # Log the test loss.
-    #     self.log('test_loss', loss, on_epoch=True, sync_dist=True)
-    #     return loss
+        return loss
+        
+
+    def test_step(self, batch, batch_idx):
+        ppg, rr, freq, breath = batch
+        x = freq
+        x1 = self.augment(x)
+        x2 = self.augment(x)
+        z1, z2 = self(x1, x2)
+        loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
+        self.log('test_loss', loss, on_epoch=True, sync_dist=True)
+        return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
