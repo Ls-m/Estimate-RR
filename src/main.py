@@ -48,7 +48,8 @@ from cwt2 import *
 import scipy.io as sio
 import h5py
 from scipy.signal import resample_poly
-
+from rwkv_freq import CNNRWKV
+from model import SSLModel
 logger = logging.getLogger("ReadData")
 
 def set_seed(seed):
@@ -2821,26 +2822,13 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
 
             # --- BRANCH 2: Frequency Domain SSL (NEW) ---
             elif cfg.training.ablation_mode in ["freq_only"]:
-                logger.info(f"[Fold {fold_id}] Starting FREQ SSL Pre-training (Time-Warp Classification)...")
+                logger.info(f"[Fold {fold_id}] Starting FREQ Contrastive SSL Pre-training")
                 
-                # 1. Setup Time-Warp Dataset
-                # Use the flattened SSL data lists
-                ssl_train_ds = TimeWarpSSLDataset(fold_data['train_ppg_ssl'], fs=125)
-                ssl_val_ds   = TimeWarpSSLDataset(fold_data['val_ppg_ssl'], fs=125)
-                total_cores = os.cpu_count()
-                optimal_workers = max(4, min(total_cores - 2, 16))
-                # Create DataModule manually to control sampler/shuffle
-                ssl_data_module = SSLDataModule(
-                    ssl_train_ds, 
-                    ssl_val_ds, 
-                    batch_size=cfg.training.batch_size, 
-                    num_workers=optimal_workers # <--- INCREASED WORKERS
+                encoder = CNNRWKV(hidden_size=cfg.training.hidden_size, num_layers=cfg.training.num_layers, dropout=cfg.training.dropout)
+                ssl_model = SSLModel(
+                    encoder=encoder,
+                    proj_dim=128, hidden_dim=256
                 )
-                # Note: from_datasets usually sets shuffle=False for val by default, which is fine.
-                # For train, it usually sets shuffle=True.
-                
-                # 2. Setup Classification Model
-                ssl_model = SSLPretrainModule(cfg)
                 pretrained_path = f"fold_{fold_id}_ssl_encoder.pth"
 
             # --- Common Training Logic ---
@@ -2868,15 +2856,15 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
                 callbacks=[ssl_checkpoint_callback, TQDMProgressBar(leave=True)]
             )
 
-            ssl_trainer.fit(ssl_model, datamodule=ssl_data_module)
+            ssl_trainer.fit(ssl_model, datamodule=data_module)
             
             # Load best and save encoder weights
             best_ssl_model_path = ssl_checkpoint_callback.best_model_path
             
             if cfg.training.ablation_mode == "time_only":
-                best_model = SSLPretrainModule.load_from_checkpoint(best_ssl_model_path)
+                best_model = SSLModel.load_from_checkpoint(best_ssl_model_path)
             else: 
-                best_model = SSLPretrainModule.load_from_checkpoint(best_ssl_model_path)
+                best_model = SSLModel.load_from_checkpoint(best_ssl_model_path)
 
             if not dist.is_initialized() or dist.get_rank() == 0:
                 # Both modules have self.encoder, so this line works for both

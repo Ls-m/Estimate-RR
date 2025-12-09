@@ -43,6 +43,8 @@ training:
   off_aug_time: False
   off_aug_freq: True
   use_capno: False
+  hidden_size: 1024
+  num_layers: 2
 
 
 logging:

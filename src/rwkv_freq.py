@@ -402,27 +402,10 @@ class GRUModel(BaseSequenceModel):
         x = self.ln_out(x)
         
         return x  # (Batch, Time, Hidden_Size)
-    
-class RWKVScalogramModel(nn.Module):
-    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
+
+class CNNRWKV(nn.Module):
+    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1):
         super().__init__()
-        
-        # --- 1. The "Eye" (Feature Extractor) ---
-        # Input: (Batch, 1, Freq=128, Time=60)
-        # We use kernels like (kernel_freq, 1) to process Frequency ONLY, preserving Time.
-        
-        # self.feature_extractor = nn.Sequential(
-        #     # Layer 1: Square Kernel (3x3) to capture 2D texture (artifacts vs breath)
-        #     # We pad (1, 1) to keep dimensions consistent before stride
-        #     nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)), 
-        #     nn.BatchNorm2d(32),
-        #     nn.ReLU(),
-            
-        #     # Layer 2: Vertical Kernel (3, 1) to compress Frequency axis further
-        #     nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(),
-        # )
         self.feature_extractor = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
             nn.BatchNorm2d(32),
@@ -437,27 +420,6 @@ class RWKVScalogramModel(nn.Module):
             nn.BatchNorm2d(128),
             nn.ReLU(),
         )
-        # self.feature_extractor = nn.Sequential(
-        #     nn.Conv2d(1, 32, kernel_size=(11, 11), stride=(1, 1), padding=(5, 5)),
-        #     nn.BatchNorm2d(32),
-        #     nn.ReLU(),
-
-        #     nn.Conv2d(32, 32, kernel_size=(7, 7), stride=(2, 1), padding=(3, 3)),
-        #     nn.BatchNorm2d(32),
-        #     nn.ReLU(),
-
-        #     nn.Conv2d(32, 64, kernel_size=(5, 3), stride=(1, 1), padding=(2, 1)),
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(),
-
-        #     nn.Conv2d(64, 64, kernel_size=(5, 3), stride=(2, 1), padding=(2, 1)),
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(),
-        # )
-        # After 2 strides of 2, Freq 128 becomes 32.
-        # Channels are 64.
-        # Total feature dimension = 32 * 64 = 2048.
-        # We project this down to RWKV hidden size.
         self.bridge = nn.Linear(32 * 128, hidden_size)
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
@@ -466,29 +428,6 @@ class RWKVScalogramModel(nn.Module):
             num_layers=num_layers, 
             dropout=dropout
         )
-        # self.rwkv = GRUModel(hidden_size, hidden_size, num_layers, dropout, bidirectional=True)
-        # --- 3. NEW: Temporal Attention Pooling ---
-        # self.temporal_attention = TemporalAttentionPooling(hidden_size, dropout=dropout)
-        # self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
-        if mode == "freq_only":
-            # --- 3. The Head ---
-            self.head = nn.Sequential(
-                nn.Linear(hidden_size, 512),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(512, 128),
-                nn.ReLU(),
-                nn.Linear(128, output_size)
-            )
-        else:
-            self.head = nn.Sequential(
-                nn.Linear(hidden_size, 512),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(512, output_size),
-            )
-
-
     def forward(self, x, return_embedding=False):
         # Input x: (Batch, Freq=128, Time=60)
         
@@ -515,14 +454,80 @@ class RWKVScalogramModel(nn.Module):
 
         # 4. Run RWKV
         seq_features = self.rwkv(features) 
-
-        # --- SSL BRANCH ---
-        if return_embedding:
-            # Global Average Pooling over Time
-            # We condense the whole 60s sequence into one vector for classification
-            return torch.mean(seq_features, dim=1) # (B, Hidden)
         
-        window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
+        window_embedding = seq_features.mean(dim=1)
+        return window_embedding
+
+        
+class RWKVScalogramModel(nn.Module):
+    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
+        super().__init__()
+        
+        # --- 1. The "Eye" (Feature Extractor) ---
+        # Input: (Batch, 1, Freq=128, Time=60)
+        # We use kernels like (kernel_freq, 1) to process Frequency ONLY, preserving Time.
+        
+        # self.feature_extractor = nn.Sequential(
+        #     # Layer 1: Square Kernel (3x3) to capture 2D texture (artifacts vs breath)
+        #     # We pad (1, 1) to keep dimensions consistent before stride
+        #     nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)), 
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+            
+        #     # Layer 2: Vertical Kernel (3, 1) to compress Frequency axis further
+        #     nn.Conv2d(32, 64, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+        # )
+        # self.feature_extractor = nn.Sequential(
+        #     nn.Conv2d(1, 32, kernel_size=(11, 11), stride=(1, 1), padding=(5, 5)),
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+
+        #     nn.Conv2d(32, 32, kernel_size=(7, 7), stride=(2, 1), padding=(3, 3)),
+        #     nn.BatchNorm2d(32),
+        #     nn.ReLU(),
+
+        #     nn.Conv2d(32, 64, kernel_size=(5, 3), stride=(1, 1), padding=(2, 1)),
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+
+        #     nn.Conv2d(64, 64, kernel_size=(5, 3), stride=(2, 1), padding=(2, 1)),
+        #     nn.BatchNorm2d(64),
+        #     nn.ReLU(),
+        # )
+        # After 2 strides of 2, Freq 128 becomes 32.
+        # Channels are 64.
+        # Total feature dimension = 32 * 64 = 2048.
+        # We project this down to RWKV hidden size.
+        self.encoder = CNNRWKV(hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
+        # self.rwkv = GRUModel(hidden_size, hidden_size, num_layers, dropout, bidirectional=True)
+        # --- 3. NEW: Temporal Attention Pooling ---
+        # self.temporal_attention = TemporalAttentionPooling(hidden_size, dropout=dropout)
+        # self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
+        if mode == "freq_only":
+            # --- 3. The Head ---
+            self.head = nn.Sequential(
+                nn.Linear(hidden_size, 512),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(512, 128),
+                nn.ReLU(),
+                nn.Linear(128, output_size)
+            )
+        else:
+            self.head = nn.Sequential(
+                nn.Linear(hidden_size, 512),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(512, output_size),
+            )
+
+
+    def forward(self, x):
+        window_embedding = self.encoder(x)
+        
+        # window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
         # 5. Apply Temporal Attention Pooling (REPLACED global average pooling)
         # window_embedding, attn_weights = self.temporal_attention(seq_features)  # (B, Hidden)
         # Predict RR for the window

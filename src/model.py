@@ -1072,8 +1072,8 @@ class RRLightningModule(pl.LightningModule):
             #     dropout_rate=cfg.training.dropout
             # )
             self.freq_model = RWKVScalogramModel(
-                hidden_size=1024,     # Internal vector size (try 128 or 256)
-                num_layers=2,        # Depth of the model
+                hidden_size=cfg.training.hidden_size,     # Internal vector size (try 128 or 256)
+                num_layers=cfg.training.num_layers,        # Depth of the model
                 dropout=cfg.training.dropout,
                 output_size=cfg.training.freq_model_output_dim,
                 mode=cfg.training.ablation_mode
@@ -1101,7 +1101,8 @@ class RRLightningModule(pl.LightningModule):
                 
                 try:
                     pretrained_dict = torch.load(pretrained_path, map_location=map_location, weights_only=True)
-                    self.freq_model.load_state_dict(pretrained_dict)
+
+                    self.freq_model.encoder.load_state_dict(pretrained_dict)
                     print("Freq Model weights loaded successfully.")
                 except Exception as e:
                     print(f"Failed to load freq weights: {e}")
@@ -1431,123 +1432,191 @@ class RRLightningModule(pl.LightningModule):
 
 
 
-# class SSLPretrainModule(pl.LightningModule):
 
-#     def __init__(self, cfg, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
-#         super().__init__()
-#         self.save_hyperparameters()
 
-#         if cfg.training.model_name == "LSTMRR":
-#             self.encoder = LSTMRRModel(output_size=64)
-#         elif cfg.training.model_name == "RWKV":
-#             self.encoder = RWKVRRModel(input_size=1, hidden_size=128, num_layers=2, dropout=0.2)
-#         elif cfg.training.model_name == "RWKVTime":
-#             self.encoder = RWKVTimeModel(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
-#         # elif cfg.training.model_name == "OptimizedRWKVRRModel":
-#         #     self.encoder = OptimizedRWKVRRModel(input_size=1,
-#         #             hidden_size=cfg.training.time_model_output_dim,
-#         #             num_layers=cfg.training.time_model_num_layers,
-#         #             dropout=cfg.training.dropout,
-#         #             output_size=cfg.training.time_model_output_dim)
-#             # self.encoder.enable_optimizations()
-#         # elif cfg.training.model_name == "RWKVTimeOPT":
-#         #     self.encoder = RWKVTimeModelOPT(input_size=1, embed_size=64, output_size=64, num_layers=2, dropout=0.2)
+#my ssl#########################
 
-#         self.projection_head = nn.Sequential(
-#             nn.Linear(32, 128),
-#             nn.ReLU(),
-#             nn.Linear(128, 32)
-#         )
+import random
+
+# --- Augmentations for scalograms ---
+class ScalogramAugment(nn.Module):
+    def __init__(self,
+                 time_mask_ratio=0.15,
+                 freq_mask_ratio=0.10,
+                 num_time_masks=1,
+                 num_freq_masks=1,
+                 time_shift_frac=0.05,
+                 amp_scale=(0.8, 1.2),
+                 noise_std=0.01):
+        super().__init__()
+        self.time_mask_ratio = time_mask_ratio
+        self.freq_mask_ratio = freq_mask_ratio
+        self.num_time_masks = num_time_masks
+        self.num_freq_masks = num_freq_masks
+        self.time_shift_frac = time_shift_frac
+        self.amp_scale = amp_scale
+        self.noise_std = noise_std
+
+    def time_mask(self, x):
+        # x: (B, 1, F, T)
+        B, C, Freq, Time = x.shape
+        out = x.clone()
+        for _ in range(self.num_time_masks):
+            t = int(Time * self.time_mask_ratio)
+            if t <= 0: continue
+            t0 = random.randint(0, max(0, Time - t))
+            out[:, :, :, t0:t0 + t] = 0
+        return out
+
+    def freq_mask(self, x):
+        B, C, Freq, Time = x.shape
+        out = x.clone()
+        for _ in range(self.num_freq_masks):
+            f = int(Freq * self.freq_mask_ratio)
+            if f <= 0: continue
+            f0 = random.randint(0, max(0, Freq - f))
+            out[:, :, f0:f0 + f, :] = 0
+        return out
+
+    def time_shift(self, x):
+        B, C, Freq, Time = x.shape
+        shift = int(Time * self.time_shift_frac)
+        if shift == 0: 
+            return x
+        k = random.randint(-shift, shift)
+        return torch.roll(x, shifts=k, dims=3)
+
+    def forward(self, x):
+        # x: (B, 1, F, T) or (B, F, T)
+        if x.dim() == 3:
+            x = x.unsqueeze(1)
+        out = x
+        out = self.time_mask(out)
+        out = self.freq_mask(out)
+        out = self.time_shift(out)
+        # amplitude scale
+        scale = random.uniform(*self.amp_scale)
+        out = out * scale
+        # noise
+        if self.noise_std > 0:
+            out = out + torch.randn_like(out) * self.noise_std
+        return out
+    
+class ProjectionHead(nn.Module):
+    def __init__(self, in_dim, proj_dim=128, hidden_dim=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, proj_dim)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class SSLModel(pl.LightningModule):
+
+    def __init__(self, encoder: nn.Module, proj_dim=128, hidden_dim=256):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = encoder
+        self.proj = ProjectionHead(encoder.rwkv.hidden_size, proj_dim, hidden_dim)
+        self.augment = ScalogramAugment(
+                 time_mask_ratio=0.15,
+                 freq_mask_ratio=0.10,
+                 num_time_masks=1,
+                 num_freq_masks=1,
+                 time_shift_frac=0.05,
+                 amp_scale=(0.8, 1.2),
+                 noise_std=0.01)
 
     
-#     def forward(self, x):
-#         return self.encoder(x)
+    def forward(self, x1, x2):
+        # x1, x2: (B, F, T) or (B, 1, F, T)
+        z1 = self.proj(self.encoder(x1, return_embedding=True))  # (B, proj_dim)
+        z2 = self.proj(self.encoder(x2, return_embedding=True))
+        z1 = F.normalize(z1, dim=-1)
+        z2 = F.normalize(z2, dim=-1)
+        return z1, z2
     
+    def _shared_step(self, batch):
+        """
+        A shared step for training, validation, and testing to avoid code duplication.
+        """
+        # In SSL, we only need the PPG signal from the batch
+        ppg, _, _ = batch
 
-#     def info_nce_loss(self, features, temperature):
-#         # Create labels that identify positive pairs
-#         labels = torch.cat([torch.arange(features.shape[0] // 2) for _ in range(2)], dim=0)
-#         labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
-#         labels = labels.to(self.device)
+        # Create two augmented views of the input PPG
+        # NOTE: It's important that augmentation is applied here to get different views
+        # even for the validation and test sets.
+        view1 = ppg_augmentation(ppg)
+        view2 = ppg_augmentation(ppg)
 
-#         # Normalize features
-#         features = F.normalize(features, dim=1)
-        
-#         # Calculate cosine similarity matrix
-#         similarity_matrix = torch.matmul(features, features.T)
-        
-#         # Discard self-similarity from the matrix
-#         mask = torch.eye(labels.shape[0], dtype=torch.bool).to(self.device)
-#         labels = labels[~mask].view(labels.shape[0], -1)
-#         similarity_matrix = similarity_matrix[~mask].view(similarity_matrix.shape[0], -1)
-        
-#         # Select positive similarities
-#         positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
-        
-#         # Select negative similarities
-#         negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
-        
-#         logits = torch.cat([positives, negatives], dim=1)
-#         # The first column (0) corresponds to the positive pair
-#         labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
-        
-#         logits = logits / temperature
-#         return F.cross_entropy(logits, labels)
+        # Get embeddings from the encoder
+        h1 = self.encoder(view1)
+        h2 = self.encoder(view2)
+
+        # Get projections from the projection head
+        z1 = self.projection_head(h1)
+        z2 = self.projection_head(h2)
+
+        # Concatenate projections for loss calculation
+        features = torch.cat([z1, z2], dim=0)
+
+        # Calculate contrastive loss
+        loss = self.info_nce_loss(features, self.hparams.temperature)
+        return loss
     
-#     def _shared_step(self, batch):
-#         """
-#         A shared step for training, validation, and testing to avoid code duplication.
-#         """
-#         # In SSL, we only need the PPG signal from the batch
-#         ppg, _, _ = batch
+    def info_nce_loss(self, z1, z2, temperature=0.1):
+        # z1, z2: (B, D) normalized
+        B, D = z1.shape
+        reps = torch.cat([z1, z2], dim=0)  # (2B, D)
+        sim = torch.matmul(reps, reps.t()) / temperature  # (2B,2B)
+        # mask self
+        mask = torch.eye(2 * B, device=z1.device, dtype=torch.bool)
+        sim.masked_fill_(mask, -1e9)
 
-#         # Create two augmented views of the input PPG
-#         # NOTE: It's important that augmentation is applied here to get different views
-#         # even for the validation and test sets.
-#         view1 = ppg_augmentation(ppg)
-#         view2 = ppg_augmentation(ppg)
+        targets = torch.arange(B, device=z1.device)
+        targets = torch.cat([targets + B, targets], dim=0)  # positives indices
 
-#         # Get embeddings from the encoder
-#         h1 = self.encoder(view1)
-#         h2 = self.encoder(view2)
+        loss = F.cross_entropy(sim, targets)
+        return loss
+    
+    def training_step(self, batch, batch_idx):
+        # loss = self._shared_step(batch)
+        # self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        # return loss# batch: (B, F, T) raw scalograms
+        ppg, rr, freq, breath = batch
+        x = freq
+        x1 = self.augment(x)
+        x2 = self.augment(x)
+        z1, z2 = self(x1, x2)
+        loss = self.info_nce_loss(z1, z2, temperature=0.1)
 
-#         # Get projections from the projection head
-#         z1 = self.projection_head(h1)
-#         z2 = self.projection_head(h2)
+        return loss
 
-#         # Concatenate projections for loss calculation
-#         features = torch.cat([z1, z2], dim=0)
+    def validation_step(self, batch, batch_idx):
+        loss = self._shared_step(batch)
+        # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
+        return loss
 
-#         # Calculate contrastive loss
-#         loss = self.info_nce_loss(features, self.hparams.temperature)
-#         return loss
+    def test_step(self, batch, batch_idx):
+        loss = self._shared_step(batch)
+        # Log the test loss.
+        self.log('test_loss', loss, on_epoch=True, sync_dist=True)
+        return loss
 
-#     def training_step(self, batch, batch_idx):
-#         loss = self._shared_step(batch)
-#         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-#         return loss
-
-#     def validation_step(self, batch, batch_idx):
-#         loss = self._shared_step(batch)
-#         # Log the validation loss. `prog_bar=True` makes it appear in the progress bar.
-#         self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
-#         return loss
-
-#     def test_step(self, batch, batch_idx):
-#         loss = self._shared_step(batch)
-#         # Log the test loss.
-#         self.log('test_loss', loss, on_epoch=True, sync_dist=True)
-#         return loss
-
-#     def configure_optimizers(self):
-#         optimizer = torch.optim.AdamW(
-#             self.parameters(),
-#             lr=self.hparams.learning_rate,
-#             weight_decay=self.hparams.weight_decay
-#         )
-#         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-#             optimizer,
-#             T_max=self.trainer.max_epochs,
-#             eta_min=1e-5
-#         )
-#         return [optimizer], [scheduler]
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.trainer.max_epochs,
+            eta_min=1e-5
+        )
+        return [optimizer], [scheduler]
