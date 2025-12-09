@@ -460,13 +460,13 @@ class RWKVScalogramModel(nn.Module):
         # We project this down to RWKV hidden size.
         self.bridge = nn.Linear(32 * 128, hidden_size)
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
-        # self.rwkv = RWKV(
-        #     input_size=hidden_size, 
-        #     hidden_size=hidden_size, 
-        #     num_layers=num_layers, 
-        #     dropout=dropout
-        # )
-        self.rwkv = GRUModel(hidden_size, hidden_size, num_layers, dropout, bidirectional=True)
+        self.rwkv = RWKV(
+            input_size=hidden_size, 
+            hidden_size=hidden_size, 
+            num_layers=num_layers, 
+            dropout=dropout
+        )
+        # self.rwkv = GRUModel(hidden_size, hidden_size, num_layers, dropout, bidirectional=True)
         # --- 3. NEW: Temporal Attention Pooling ---
         # self.temporal_attention = TemporalAttentionPooling(hidden_size, dropout=dropout)
         # self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
