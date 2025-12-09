@@ -1222,19 +1222,20 @@ def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, breath_list, freq_li
 
             if do_mixup:
                 # --- MIXUP PATH ---
-                # Pick two DIFFERENT random indices from the same class
                 idx1, idx2 = np.random.choice(indices, 2, replace=True)
                 
-                src_freq1, src_breath1 = freq_list[idx1], breath_list[idx1]
-                src_freq2, src_breath2 = freq_list[idx2], breath_list[idx2]
+                # Retrieve raw data
+                raw_freq1 = freq_list[idx1]
+                raw_freq2 = freq_list[idx2]
+                raw_breath1 = breath_list[idx1]
+                raw_breath2 = breath_list[idx2]
 
-                # Blend Images
-                aug_freq, weight1 = augmentor.mixup(src_freq1, src_freq2)
+                # Pass to mixup (the updated method will handle the array conversion)
+                aug_freq, weight1 = augmentor.mixup(raw_freq1, raw_freq2)
                 
-                # Blend Labels (Linear Interpolation)
-                # If breath is array (60,), this blends the waveforms
+                # Blend Labels (Force conversion to array here too!)
                 weight2 = 1.0 - weight1
-                aug_breath = (weight1 * np.array(src_breath1)) + (weight2 * np.array(src_breath2))
+                aug_breath = (weight1 * np.array(raw_breath1)) + (weight2 * np.array(raw_breath2))
                 
             else:
                 # --- STANDARD PATH ---

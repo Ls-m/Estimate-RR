@@ -197,22 +197,25 @@ class ScalogramAugmentor:
         )
         
         return np.clip(augmented, 0.0, 1.0).astype(np. float32)
-    def mixup(self, scalogram1: np.ndarray, scalogram2: np.ndarray) -> Tuple[np.ndarray, float]:
+    def mixup(self, scalogram1, scalogram2) -> Tuple[np.ndarray, float]:
         """
         Blend two scalograms. 
         Returns the blended image AND the weight used for the first image.
         """
-        # Sample mixing weight (small alpha means mostly image 1)
-        # Using Beta distribution is standard for Mixup, but Uniform is fine too
-        # alpha_val ~ Uniform(0, 0.2) -> weight_s2 is small
+        # --- FIX: Ensure inputs are NumPy arrays ---
+        scalogram1 = np.array(scalogram1, dtype=np.float32)
+        scalogram2 = np.array(scalogram2, dtype=np.float32)
+        
+        # Check shapes
+        if scalogram1.shape != scalogram2.shape:
+            raise ValueError(f"Scalogram shapes don't match: {scalogram1.shape} vs {scalogram2.shape}")
+
+        # Sample mixing weight
+        # alpha_val ~ Uniform(0, mixup_alpha) -> weight for second image
         alpha_val = np.random.uniform(0, self.mixup_alpha)
         
-        # weight_s1 is the contribution of the first image (e.g., 0.9)
+        # weight_s1 is the contribution of the first image
         weight_s1 = 1.0 - alpha_val
-        
-        # Ensure same shape
-        if scalogram1.shape != scalogram2.shape:
-            raise ValueError("Scalogram shapes don't match")
         
         # Blend images
         blended = weight_s1 * scalogram1 + alpha_val * scalogram2
