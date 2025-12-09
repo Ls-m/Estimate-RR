@@ -197,36 +197,56 @@ class ScalogramAugmentor:
         )
         
         return np.clip(augmented, 0.0, 1.0).astype(np. float32)
-    
-    def mixup(self, scalogram1: np.ndarray, scalogram2: np.ndarray) -> np.ndarray:
+    def mixup(self, scalogram1: np.ndarray, scalogram2: np.ndarray) -> Tuple[np.ndarray, float]:
         """
-        Blend two scalograms from the SAME RR class.
-        
-        This creates synthetic variations while preserving the RR label.
-        
-        Args:
-            scalogram1, scalogram2: 2D scalograms from same RR class
-            
-        Returns:
-            Blended scalogram
-            
-        Example:
-            - RR class = 15 BPM
-            - Scalogram A from subject 1 (15 BPM)
-            - Scalogram B from subject 5 (15 BPM)
-            - Mixup: 0.8 * A + 0.2 * B
-            - Result: Synthetic 15 BPM with blended characteristics
+        Blend two scalograms. 
+        Returns the blended image AND the weight used for the first image.
         """
-        alpha = np.random.uniform(0, self.mixup_alpha)
+        # Sample mixing weight (small alpha means mostly image 1)
+        # Using Beta distribution is standard for Mixup, but Uniform is fine too
+        # alpha_val ~ Uniform(0, 0.2) -> weight_s2 is small
+        alpha_val = np.random.uniform(0, self.mixup_alpha)
+        
+        # weight_s1 is the contribution of the first image (e.g., 0.9)
+        weight_s1 = 1.0 - alpha_val
         
         # Ensure same shape
-        if scalogram1. shape != scalogram2.shape:
-            raise ValueError(f"Scalogram shapes don't match: {scalogram1. shape} vs {scalogram2. shape}")
+        if scalogram1.shape != scalogram2.shape:
+            raise ValueError("Scalogram shapes don't match")
         
-        # Blend
-        blended = (1 - alpha) * scalogram1 + alpha * scalogram2
+        # Blend images
+        blended = weight_s1 * scalogram1 + alpha_val * scalogram2
         
-        return np.clip(blended, 0.0, 1.0).astype(np.float32)
+        return np.clip(blended, 0.0, 1.0).astype(np.float32), weight_s1
+    # def mixup(self, scalogram1: np.ndarray, scalogram2: np.ndarray) -> np.ndarray:
+    #     """
+    #     Blend two scalograms from the SAME RR class.
+        
+    #     This creates synthetic variations while preserving the RR label.
+        
+    #     Args:
+    #         scalogram1, scalogram2: 2D scalograms from same RR class
+            
+    #     Returns:
+    #         Blended scalogram
+            
+    #     Example:
+    #         - RR class = 15 BPM
+    #         - Scalogram A from subject 1 (15 BPM)
+    #         - Scalogram B from subject 5 (15 BPM)
+    #         - Mixup: 0.8 * A + 0.2 * B
+    #         - Result: Synthetic 15 BPM with blended characteristics
+    #     """
+    #     alpha = np.random.uniform(0, self.mixup_alpha)
+        
+    #     # Ensure same shape
+    #     if scalogram1. shape != scalogram2.shape:
+    #         raise ValueError(f"Scalogram shapes don't match: {scalogram1. shape} vs {scalogram2. shape}")
+        
+    #     # Blend
+    #     blended = (1 - alpha) * scalogram1 + alpha * scalogram2
+        
+    #     return np.clip(blended, 0.0, 1.0).astype(np.float32)
     
     def batch_augment(self, scalograms: np.ndarray) -> np.ndarray:
         """

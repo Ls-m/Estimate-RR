@@ -1063,28 +1063,126 @@ def process_cwt_on_gpu(ppg_list, device='cuda'):
 
 
 
+# def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, breath_list, freq_list):
+#     """
+#     Balanced dataset generation with SCALOGRAM augmentation.
+    
+#     CRITICAL FIX:
+#     1. CWT scalograms are computed FIRST
+#     2. Scalograms are augmented directly (not PPG)
+#     3. RR labels remain unchanged and valid
+#     """
+#     print("--- Starting Dataset Balancing (Scalogram-based) ---")
+    
+#     # Ensure inputs are lists
+#     if isinstance(ppg_list, np.ndarray): ppg_list = list(ppg_list)
+#     if isinstance(rr_list, np.ndarray): rr_list = list(rr_list)
+#     if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
+#     if isinstance(breath_list, np.ndarray): breath_list = list(breath_list)
+
+#     # 1. Organize Indices by RR Class (same as before)
+#     class_indices = {0: [], 1: [], 2: [], 3: [], 4: []}
+
+#     for i, rr in enumerate(breath_list):
+#         mean_rr = breath_list[i][0]
+#         if mean_rr < 10: bin_idx = 0
+#         elif 10 <= mean_rr < 15: bin_idx = 1
+#         elif 15 <= mean_rr < 20: bin_idx = 2
+#         elif 20 <= mean_rr < 25: bin_idx = 3
+#         else: bin_idx = 4
+#         class_indices[bin_idx].append(i)
+    
+#     # for i, rr in enumerate(rr_list):
+#     #     mean_rr = np.mean(rr)
+#     #     if mean_rr < 10: bin_idx = 0
+#     #     elif 10 <= mean_rr < 15: bin_idx = 1
+#     #     elif 15 <= mean_rr < 20: bin_idx = 2
+#     #     elif 20 <= mean_rr < 25: bin_idx = 3
+#     #     else: bin_idx = 4
+#     #     class_indices[bin_idx].append(i)
+
+#     # 2. Find Majority Count
+#     counts = [len(idxs) for idxs in class_indices.values()]
+#     target_count = max(counts)
+#     print(f"Initial Counts: {counts}")
+#     print(f"Target per class: {target_count}")
+    
+#     new_freq_aug = []  # <<< AUGMENTED SCALOGRAMS
+#     new_breath = []        # <<< LABELS (UNCHANGED)
+
+#     # Initialize augmentor
+#     augmentor = ScalogramAugmentor(
+#         intensity_range=(0.85, 1.15),
+#         contrast_range=(0.80, 1.20),
+#         freq_jitter_pct=0.03,
+#         time_jitter_pct=0.03,
+#         blur_sigma_range=(0.3, 0.8),
+#         rotation_range=(-3, 3)
+#     )
+    
+#     # 3. Generate Augmented Data
+#     for bin_idx, indices in class_indices.items():
+#         current_count = len(indices)
+#         if current_count == 0:
+#             continue
+
+#         needed = target_count - current_count
+#         if needed <= 0:
+#             continue
+            
+#         print(f"Class {bin_idx}: Generating {needed} samples using {current_count} sources...")
+
+#         for k in range(needed):
+#             source_idx = indices[k % current_count]
+            
+#             # Get ORIGINAL scalogram and label
+#             src_freq = freq_list[source_idx]  # Shape: (128, 60)
+#             # src_rr = rr_list[source_idx]      # Shape: (60,)
+#             src_breath = breath_list[source_idx]  # Shape: (60,)
+
+#             # AUGMENT THE SCALOGRAM (not the label)
+#             aug_freq = augmentor.augment(src_freq)
+            
+#             # Label stays the same ✓
+#             aug_breath = copy.deepcopy(src_breath)
+
+#             new_freq_aug.append(aug_freq)
+#             new_breath.append(aug_breath)
+
+#     # 4. Combine Original + Augmented
+#     final_freq = freq_list + new_freq_aug
+#     final_breath = breath_list + new_breath
+#     final_ppg = ppg_list  # PPG is NOT augmented (no need)
+    
+#     print(f"Balancing Complete.  Added {len(new_freq_aug)} synthetic samples.")
+#     print(f"Final Dataset Size: {len(final_freq)}")
+    
+#     # VALIDATION: Check RR distribution is unchanged
+#     original_means = np.array([breath for breath in breath_list])
+#     augmented_means = np.array([breath for breath in final_breath])
+
+#     print(f"\n--- RR Label Validation ---")
+#     print(f"Original RR mean: {original_means.mean():.2f} ± {original_means.std():.2f}")
+#     print(f"After augmentation: {augmented_means.mean():.2f} ± {augmented_means.std():.2f}")
+#     print(f"✓ Labels preserved (only scalograms augmented)\n")
+
+#     return final_ppg, final_breath, final_freq
+
+
 def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, breath_list, freq_list):
-    """
-    Balanced dataset generation with SCALOGRAM augmentation.
+    print("--- Starting Dataset Balancing (Scalogram-based + Mixup) ---")
     
-    CRITICAL FIX:
-    1. CWT scalograms are computed FIRST
-    2. Scalograms are augmented directly (not PPG)
-    3. RR labels remain unchanged and valid
-    """
-    print("--- Starting Dataset Balancing (Scalogram-based) ---")
-    
-    # Ensure inputs are lists
+    # [Setup Code - Same as before] -----------------------------------------
     if isinstance(ppg_list, np.ndarray): ppg_list = list(ppg_list)
-    if isinstance(rr_list, np.ndarray): rr_list = list(rr_list)
-    if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
     if isinstance(breath_list, np.ndarray): breath_list = list(breath_list)
+    if isinstance(freq_list, np.ndarray): freq_list = list(freq_list)
 
-    # 1. Organize Indices by RR Class (same as before)
+    # Binning indices
     class_indices = {0: [], 1: [], 2: [], 3: [], 4: []}
-
-    for i, rr in enumerate(breath_list):
-        mean_rr = breath_list[i][0]
+    for i, breath in enumerate(breath_list):
+        # Assuming breath_list[i] is an array, take mean or first value
+        mean_rr = np.mean(breath) if isinstance(breath, (list, np.ndarray)) else breath
+        
         if mean_rr < 10: bin_idx = 0
         elif 10 <= mean_rr < 15: bin_idx = 1
         elif 15 <= mean_rr < 20: bin_idx = 2
@@ -1092,82 +1190,74 @@ def balance_dataset_with_synthesis_fixed(ppg_list, rr_list, breath_list, freq_li
         else: bin_idx = 4
         class_indices[bin_idx].append(i)
     
-    # for i, rr in enumerate(rr_list):
-    #     mean_rr = np.mean(rr)
-    #     if mean_rr < 10: bin_idx = 0
-    #     elif 10 <= mean_rr < 15: bin_idx = 1
-    #     elif 15 <= mean_rr < 20: bin_idx = 2
-    #     elif 20 <= mean_rr < 25: bin_idx = 3
-    #     else: bin_idx = 4
-    #     class_indices[bin_idx].append(i)
-
-    # 2. Find Majority Count
     counts = [len(idxs) for idxs in class_indices.values()]
     target_count = max(counts)
-    print(f"Initial Counts: {counts}")
-    print(f"Target per class: {target_count}")
     
-    new_freq_aug = []  # <<< AUGMENTED SCALOGRAMS
-    new_breath = []        # <<< LABELS (UNCHANGED)
-
-    # Initialize augmentor
+    new_freq_aug = []
+    new_breath = []
+    
+    # Initialize Augmentor
     augmentor = ScalogramAugmentor(
         intensity_range=(0.85, 1.15),
         contrast_range=(0.80, 1.20),
         freq_jitter_pct=0.03,
         time_jitter_pct=0.03,
         blur_sigma_range=(0.3, 0.8),
-        rotation_range=(-3, 3)
+        rotation_range=(-3, 3),
+        mixup_alpha=0.3  # Mix up to 30% of the second image
     )
     
-    # 3. Generate Augmented Data
+    # [Generation Loop] -----------------------------------------------------
     for bin_idx, indices in class_indices.items():
         current_count = len(indices)
-        if current_count == 0:
-            continue
+        if current_count == 0: continue
 
         needed = target_count - current_count
-        if needed <= 0:
-            continue
-            
-        print(f"Class {bin_idx}: Generating {needed} samples using {current_count} sources...")
+        print(f"Class {bin_idx}: Generating {needed} samples...")
 
         for k in range(needed):
-            source_idx = indices[k % current_count]
-            
-            # Get ORIGINAL scalogram and label
-            src_freq = freq_list[source_idx]  # Shape: (128, 60)
-            # src_rr = rr_list[source_idx]      # Shape: (60,)
-            src_breath = breath_list[source_idx]  # Shape: (60,)
+            # DECISION: 40% chance of Mixup, 60% standard aug
+            # We only do Mixup if we have at least 2 samples in this class
+            do_mixup = (np.random.rand() < 0.4) and (current_count > 1)
 
-            # AUGMENT THE SCALOGRAM (not the label)
-            aug_freq = augmentor.augment(src_freq)
-            
-            # Label stays the same ✓
-            aug_breath = copy.deepcopy(src_breath)
+            if do_mixup:
+                # --- MIXUP PATH ---
+                # Pick two DIFFERENT random indices from the same class
+                idx1, idx2 = np.random.choice(indices, 2, replace=True)
+                
+                src_freq1, src_breath1 = freq_list[idx1], breath_list[idx1]
+                src_freq2, src_breath2 = freq_list[idx2], breath_list[idx2]
+
+                # Blend Images
+                aug_freq, weight1 = augmentor.mixup(src_freq1, src_freq2)
+                
+                # Blend Labels (Linear Interpolation)
+                # If breath is array (60,), this blends the waveforms
+                weight2 = 1.0 - weight1
+                aug_breath = (weight1 * np.array(src_breath1)) + (weight2 * np.array(src_breath2))
+                
+            else:
+                # --- STANDARD PATH ---
+                source_idx = indices[k % current_count]
+                src_freq = freq_list[source_idx]
+                src_breath = breath_list[source_idx]
+
+                # Augment Image
+                aug_freq = augmentor.augment(src_freq)
+                
+                # Keep Label
+                aug_breath = copy.deepcopy(src_breath)
 
             new_freq_aug.append(aug_freq)
             new_breath.append(aug_breath)
 
-    # 4. Combine Original + Augmented
+    # Combine and Return
     final_freq = freq_list + new_freq_aug
     final_breath = breath_list + new_breath
-    final_ppg = ppg_list  # PPG is NOT augmented (no need)
-    
-    print(f"Balancing Complete.  Added {len(new_freq_aug)} synthetic samples.")
-    print(f"Final Dataset Size: {len(final_freq)}")
-    
-    # VALIDATION: Check RR distribution is unchanged
-    original_means = np.array([breath for breath in breath_list])
-    augmented_means = np.array([breath for breath in final_breath])
+    final_ppg = ppg_list # PPG not augmented
 
-    print(f"\n--- RR Label Validation ---")
-    print(f"Original RR mean: {original_means.mean():.2f} ± {original_means.std():.2f}")
-    print(f"After augmentation: {augmented_means.mean():.2f} ± {augmented_means.std():.2f}")
-    print(f"✓ Labels preserved (only scalograms augmented)\n")
-
+    print(f"Balancing Complete. Added {len(new_freq_aug)} samples.")
     return final_ppg, final_breath, final_freq
-
 # def balance_dataset_with_synthesis(ppg_list, rr_list, freq_list):
 #     print("--- Starting Dataset Balancing (Parallelized) ---")
     
