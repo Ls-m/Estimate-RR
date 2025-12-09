@@ -327,6 +327,43 @@ class PositionalEncoding(nn.Module):
             raise ValueError(f"PosEnc d_model ({self.pe.size(2)}) != input dim ({D})")
         x = x + self.pe[:, :T, :].to(x.device)
         return self.dropout(x)
+    
+class TemporalAttentionPooling(nn.Module):
+    """
+    Learns to weight different time steps based on their importance.
+    Instead of simple averaging, this allows the model to focus on 
+    the most informative parts of the 60-second window.
+    """
+    def __init__(self, hidden_size, dropout=0.1):
+        super().__init__()
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.Tanh(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size // 2, 1)
+        )
+    
+    def forward(self, x):
+        """
+        Args:
+            x: (Batch, Time, Hidden) - RWKV output
+        Returns:
+            pooled: (Batch, Hidden) - Weighted representation
+            attention_weights: (Batch, Time, 1) - Optional, for visualization
+        """
+        # Compute attention scores for each time step
+        attn_scores = self.attention(x)  # (B, T, 1)
+        
+        # Normalize to get attention weights (sum to 1 across time)
+        attn_weights = torch.softmax(attn_scores, dim=1)  # (B, T, 1)
+        
+        # Apply attention weights
+        weighted = x * attn_weights  # (B, T, Hidden)
+        
+        # Sum across time dimension
+        pooled = weighted.sum(dim=1)  # (B, Hidden)
+        
+        return pooled, attn_weights  # Return weights for visualization
 class RWKVScalogramModel(nn.Module):
     def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
         super().__init__()
@@ -383,7 +420,6 @@ class RWKVScalogramModel(nn.Module):
         # Total feature dimension = 32 * 64 = 2048.
         # We project this down to RWKV hidden size.
         self.bridge = nn.Linear(32 * 128, hidden_size)
-        self.pos_encoder = PositionalEncoding(hidden_size, dropout=0.0, max_len=256)
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
             input_size=hidden_size, 
@@ -391,6 +427,8 @@ class RWKVScalogramModel(nn.Module):
             num_layers=num_layers, 
             dropout=dropout
         )
+        # --- 3. NEW: Temporal Attention Pooling ---
+        self.temporal_attention = TemporalAttentionPooling(hidden_size, dropout=dropout)
         # self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
         if mode == "freq_only":
             # --- 3. The Head ---
@@ -434,7 +472,6 @@ class RWKVScalogramModel(nn.Module):
         # Project to hidden size
         features = self.bridge(features) # (B, 60, Hidden)
         # ---- ADD POSITIONAL ENCODING HERE ----
-        features = self.pos_encoder(features)   # still (B, T, hidden_size)
 
         # 4. Run RWKV
         seq_features = self.rwkv(features) 
@@ -445,8 +482,9 @@ class RWKVScalogramModel(nn.Module):
             # We condense the whole 60s sequence into one vector for classification
             return torch.mean(seq_features, dim=1) # (B, Hidden)
         
-        window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
-
+        # window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
+        # 5. Apply Temporal Attention Pooling (REPLACED global average pooling)
+        window_embedding, attn_weights = self.temporal_attention(seq_features)  # (B, Hidden)
         # Predict RR for the window
         out = self.head(window_embedding)
         # 5. Apply Head
