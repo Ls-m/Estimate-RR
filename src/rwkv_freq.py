@@ -364,6 +364,45 @@ class TemporalAttentionPooling(nn.Module):
         pooled = weighted.sum(dim=1)  # (B, Hidden)
         
         return pooled, attn_weights  # Return weights for visualization
+    
+class GRUModel(BaseSequenceModel):
+    """Bidirectional GRU for time series."""
+    
+    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2,
+                 dropout: float = 0.1, bidirectional: bool = True):
+        super().__init__(input_size, hidden_size, num_layers, dropout)
+        
+        self.bidirectional = bidirectional
+        
+        # Input projection
+        self.input_proj = nn.Linear(input_size, hidden_size)
+        
+        # GRU
+        self.gru = nn.GRU(
+            input_size=hidden_size,
+            hidden_size=hidden_size // 2 if bidirectional else hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            batch_first=True,
+            bidirectional=bidirectional
+        )
+        
+        # Output layer norm
+        self.ln_out = nn.LayerNorm(hidden_size)
+    
+    def forward(self, x: torch.Tensor) -> torch. Tensor:
+        """Forward pass through GRU."""
+        # Input projection
+        x = self.input_proj(x)
+        
+        # GRU processing
+        x, _ = self.gru(x)
+        
+        # Output normalization
+        x = self.ln_out(x)
+        
+        return x  # (Batch, Time, Hidden_Size)
+    
 class RWKVScalogramModel(nn.Module):
     def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
         super().__init__()
@@ -421,14 +460,15 @@ class RWKVScalogramModel(nn.Module):
         # We project this down to RWKV hidden size.
         self.bridge = nn.Linear(32 * 128, hidden_size)
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
-        self.rwkv = RWKV(
-            input_size=hidden_size, 
-            hidden_size=hidden_size, 
-            num_layers=num_layers, 
-            dropout=dropout
-        )
+        # self.rwkv = RWKV(
+        #     input_size=hidden_size, 
+        #     hidden_size=hidden_size, 
+        #     num_layers=num_layers, 
+        #     dropout=dropout
+        # )
+        self.rwkv = GRUModel(hidden_size, hidden_size, num_layers, dropout, bidirectional=True)
         # --- 3. NEW: Temporal Attention Pooling ---
-        self.temporal_attention = TemporalAttentionPooling(hidden_size, dropout=dropout)
+        # self.temporal_attention = TemporalAttentionPooling(hidden_size, dropout=dropout)
         # self.rwkv = TransformerModel(hidden_size, hidden_size, num_layers, dropout, nhead=8)
         if mode == "freq_only":
             # --- 3. The Head ---
@@ -482,9 +522,9 @@ class RWKVScalogramModel(nn.Module):
             # We condense the whole 60s sequence into one vector for classification
             return torch.mean(seq_features, dim=1) # (B, Hidden)
         
-        # window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
+        window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
         # 5. Apply Temporal Attention Pooling (REPLACED global average pooling)
-        window_embedding, attn_weights = self.temporal_attention(seq_features)  # (B, Hidden)
+        # window_embedding, attn_weights = self.temporal_attention(seq_features)  # (B, Hidden)
         # Predict RR for the window
         out = self.head(window_embedding)
         # 5. Apply Head
