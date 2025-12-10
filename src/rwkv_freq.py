@@ -413,51 +413,55 @@ class Residual(nn.Module):
         return self.fn(x) + x
 
 class ConvMixerTokenizer(nn.Module):
-    def __init__(self, dim, depth, kernel_size=7):
+    """
+    Acts as the 'Eye'. 
+    Processes the Scalogram but preserves the TIME dimension for RWKV.
+    """
+    def __init__(self, dim, depth, kernel_size=7, patch_size=1):
         super().__init__()
         
-        # Input: (Batch, 1, 128, 64)
+        # 1. Patch Embedding 
+        # We use patch_size=1 or (Freq_Patch, 1) to keep Time resolution high
+        # Input: (B, 1, 128, 60)
+        # We want to compress 128 Freq bins -> 1 "Token" vector, but keep 60 Time steps.
         
-        # 1. Patch Embedding
-        # Kernel (4, 1) means: "Look at 4 freq bins, but only 1 time step"
-        # Stride (4, 1) means: "Jump 4 steps down, but move 1 step right"
+        # Strategy: Use a stride on Frequency axis, but stride=1 on Time axis
         self.patch_embed = nn.Sequential(
-            nn.Conv2d(1, dim, kernel_size=(4, 1), stride=(4, 1)),
+            nn.Conv2d(1, dim, kernel_size=(4, 1), stride=(4, 1)), # Compresses Freq only
             nn.GELU(),
             nn.BatchNorm2d(dim)
         )
-        # Resulting Shape: 
-        # Freq: 128 / 4 = 32
-        # Time: 64 / 1 = 64
-        # Tensor: (Batch, dim, 32, 64)
+        # After this, Freq dim is 128/4 = 32. Time dim is 60.
 
-        # 2. ConvMixer Blocks (The "Eye")
+        # 2. ConvMixer Blocks
         self.blocks = nn.Sequential(
             *[nn.Sequential(
                 Residual(nn.Sequential(
-                    # Padding="same" ensures we stay at 32x64
+                    # Spatial Mixing (Freq and Time neighbors)
                     nn.Conv2d(dim, dim, kernel_size, groups=dim, padding="same"),
                     nn.GELU(),
                     nn.BatchNorm2d(dim)
                 )),
-                nn.Conv2d(dim, dim, kernel_size=1),
+                nn.Conv2d(dim, dim, kernel_size=1), # Channel Mixing
                 nn.GELU(),
                 nn.BatchNorm2d(dim)
             ) for _ in range(depth)]
         )
         
-        # 3. Frequency Pooling
-        # Squash Freq (32 -> 1). Keep Time (64 -> 64).
-        self.freq_pool = nn.AdaptiveAvgPool2d((1, None)) 
+        # 3. Final Projection to clean up Frequency dimension
+        # We pool the remaining Frequency bins into a single vector per time step
+        self.freq_pool = nn.AdaptiveAvgPool2d((1, None)) # Output (B, dim, 1, T)
 
     def forward(self, x):
         if x.dim() == 3: x = x.unsqueeze(1)
-        x = self.patch_embed(x) # (B, dim, 32, 64)
-        x = self.blocks(x)      # (B, dim, 32, 64)
-        x = self.freq_pool(x)   # (B, dim, 1, 64)
         
-        # Prepare for RWKV: (Batch, Time=64, Dim=256)
-        return x.squeeze(2).permute(0, 2, 1)
+        x = self.patch_embed(x) # (B, dim, 32, 60)
+        x = self.blocks(x)      # (B, dim, 32, 60)
+        x = self.freq_pool(x)   # (B, dim, 1, 60)
+        
+        # Reshape for RWKV: (Batch, Time, Dim)
+        x = x.squeeze(2).permute(0, 2, 1) 
+        return x
     
 class CNNRWKV(nn.Module):
     def __init__(self, hidden_size=256, num_layers=2, dropout=0.1):

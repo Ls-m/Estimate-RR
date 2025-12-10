@@ -1408,7 +1408,7 @@ def balance_dataset_with_synthesis(ppg_list, breath_list):
     
     return final_ppg, final_breath
 
-def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 64), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
+def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
     """
     Generates a CWT scalogram optimized for Seq2Seq RWKV.
     
