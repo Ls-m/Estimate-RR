@@ -1040,7 +1040,7 @@ class RRLightningModule(pl.LightningModule):
             model_name = cfg.training.model_name
             if model_name == "Linear":
                 # model = PPGtoRR(input_length=cfg.training.window_size*125)
-                model = CNN_RWKV_Model(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                model = CNN_RWKV_Model(hidden_size=1024, num_layers=2, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
                 # model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
