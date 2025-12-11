@@ -182,7 +182,7 @@ class CNN_RWKV_Model(nn.Module):
             nn.BatchNorm1d(8),
             nn.ReLU(),
 
-            nn.Permute(0, 2, 1)  # (B, C, T) → (B, T, C)
+            
         )
 
         self.rwkv = RWKVRRModel(
@@ -203,6 +203,7 @@ class CNN_RWKV_Model(nn.Module):
         # x: (B, T)
         x = x.unsqueeze(1)             # -> (B, 1, T)
         x = self.cnn(x)                # -> (B, T_new, C_new=8)
+        x = x.permute(0, 2, 1)         # -> (B, C_new=8, T_new)
         x = self.rwkv(x)               # -> (B, hidden)
         x = self.fc(x)                 # -> (B, output_size)
         return x
