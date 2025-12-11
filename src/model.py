@@ -165,6 +165,48 @@ class CNNLinearModel(nn.Module):
         x = x.unsqueeze(1)  # Add channel dimension
         return self.model(x)
 
+class CNN_RWKV_Model(nn.Module):
+    def __init__(self, hidden_size=256, num_layers=2, output_size=512, dropout=0):
+        super().__init__()
+
+        self.cnn = nn.Sequential(
+            nn.Conv1d(1, 8, kernel_size=250, stride=2),
+            nn.BatchNorm1d(8),
+            nn.ReLU(),
+
+            nn.Conv1d(8, 16, kernel_size=125, stride=2),
+            nn.BatchNorm1d(16),
+            nn.ReLU(),
+
+            nn.Conv1d(16, 8, kernel_size=125, stride=1),
+            nn.BatchNorm1d(8),
+            nn.ReLU(),
+
+            nn.Permute(0, 2, 1)  # (B, C, T) → (B, T, C)
+        )
+
+        self.rwkv = RWKVRRModel(
+            input_size=8,               # channels from cnn
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=0
+        )
+
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//4),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size//4, output_size)
+        )
+
+    def forward(self, x):
+        # x: (B, T)
+        x = x.unsqueeze(1)             # -> (B, 1, T)
+        x = self.cnn(x)                # -> (B, T_new, C_new=8)
+        x = self.rwkv(x)               # -> (B, hidden)
+        x = self.fc(x)                 # -> (B, output_size)
+        return x
+
 class SimpleCNNLinearModel(nn.Module):
     def __init__(self, input_size=60*125, 
           hidden_size=2048, output_size=512, dropout=0):
@@ -998,7 +1040,8 @@ class RRLightningModule(pl.LightningModule):
             model_name = cfg.training.model_name
             if model_name == "Linear":
                 # model = PPGtoRR(input_length=cfg.training.window_size*125)
-                model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                model = CNN_RWKV_Model(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
+                # model = CNNLinearModel(input_size=cfg.training.window_size*125, hidden_size=1024, output_size=cfg.training.time_model_output_dim, dropout=cfg.training.dropout)
             elif model_name == "LSTMRR":
                 model = LSTMRRModel(input_size=1, hidden_size=128, num_layers=4, output_size=cfg.training.window_size, dropout=cfg.training.dropout)
             elif model_name == "RWKV":
