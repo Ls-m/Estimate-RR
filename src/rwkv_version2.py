@@ -238,7 +238,7 @@ class RWKVRRModel(nn.Module):
             Output tensor (B, output_size) - SAME SHAPE AS ORIGINAL
         """
         # x: (B, T, 1)
-        x = x.unsqueeze(-1)
+        # x = x.unsqueeze(-1)
         rwkv_out = self.rwkv(x)        # returns (B, hidden_size)
         out = self.fc(rwkv_out)        # map to embedding dimension (B, output_size)
         return out
