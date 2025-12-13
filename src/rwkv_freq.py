@@ -467,7 +467,7 @@ class CNNRWKV(nn.Module):
     def __init__(self, hidden_size=256, num_layers=2, dropout=0.1):
         super().__init__()
         self.feature_extractor = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2)),
+            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
