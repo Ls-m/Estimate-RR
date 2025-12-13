@@ -1557,95 +1557,187 @@ class ProjectionHead(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+    
+class ReconstructionDecoder(nn.Module):
+    def __init__(self, latent_dim=1024, F=128, T=60):
+        super().__init__()
+        self.F = F
+        self.T = T
+        self.net = nn.Sequential(
+            nn.Linear(latent_dim, 2048),
+            nn.ReLU(inplace=True),
+            nn.Linear(2048, F * T)
+        )
+
+    def forward(self, z):
+        # z: (B, latent_dim)
+        x_hat = self.net(z)                  # (B, F*T)
+        x_hat = x_hat.view(z.size(0), 1, self.F, self.T)
+        return x_hat
 
 class SSLModel(pl.LightningModule):
 
-    def __init__(self, encoder: nn.Module, proj_dim=128, hidden_dim=256, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        latent_dim=1024,
+        F=128,
+        T=60,
+        learning_rate=1e-3,
+        weight_decay=1e-5,
+    ):
         super().__init__()
         self.save_hyperparameters()
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.temperature = temperature
+
         self.encoder = encoder
-        self.proj = ProjectionHead(encoder.rwkv.hidden_size, proj_dim, hidden_dim)
+        self.decoder = ReconstructionDecoder(latent_dim, F, T)
+
         self.augment = ScalogramAugment(
-                 time_mask_ratio=0.15,
-                 freq_mask_ratio=0.10,
-                 num_time_masks=1,
-                 num_freq_masks=1,
-                 time_shift_frac=0.05,
-                 amp_scale=(0.8, 1.2),
-                 noise_std=0.01)
+            time_mask_ratio=0.15,
+            freq_mask_ratio=0.10,
+            num_time_masks=1,
+            num_freq_masks=1,
+            time_shift_frac=0.05,
+            amp_scale=(0.8, 1.2),
+            noise_std=0.01
+        )
 
-    
-    def forward(self, x1, x2):
-        # x1, x2: (B, F, T) or (B, 1, F, T)
-        z1 = self.proj(self.encoder(x1, return_embedding=True))  # (B, proj_dim)
-        z2 = self.proj(self.encoder(x2, return_embedding=True))
-        z1 = F.normalize(z1, dim=-1)
-        z2 = F.normalize(z2, dim=-1)
-        return z1, z2
+        # L1 is usually better for spectrograms
+        self.loss_fn = nn.L1Loss()
 
-    
-    def info_nce_loss(self, z1, z2, temperature=0.1):
-        # z1, z2: (B, D) normalized
-        B, D = z1.shape
-        reps = torch.cat([z1, z2], dim=0)  # (2B, D)
-        sim = torch.matmul(reps, reps.t()) / temperature  # (2B,2B)
-        # mask self
-        mask = torch.eye(2 * B, device=z1.device, dtype=torch.bool)
-        sim.masked_fill_(mask, -1e9)
-
-        targets = torch.arange(B, device=z1.device)
-        targets = torch.cat([targets + B, targets], dim=0)  # positives indices
-
-        loss = F.cross_entropy(sim, targets)
-        return loss
-    
+    def forward(self, x):
+        # x: (B, 1, F, T)
+        z = self.encoder(x, return_embedding=True)  # (B, latent_dim)
+        x_hat = self.decoder(z)                     # (B, 1, F, T)
+        return x_hat  
     def training_step(self, batch, batch_idx):
-        # loss = self._shared_step(batch)
-        # self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        # return loss# batch: (B, F, T) raw scalograms
         ppg, rr, freq, breath = batch
         x = freq
-        x1 = self.augment(x)
-        x2 = self.augment(x)
-        z1, z2 = self(x1, x2)
-        loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
 
-        return loss
+        if x.dim() == 3:
+            x = x.unsqueeze(1)  # (B, 1, F, T)
 
+        x_corrupt = self.augment(x)
+        x_hat = self(x_corrupt)
+
+        loss = self.loss_fn(x_hat, x)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss 
     def validation_step(self, batch, batch_idx):
         ppg, rr, freq, breath = batch
-        x = freq
-        x1 = self.augment(x)
-        x2 = self.augment(x)
-        z1, z2 = self(x1, x2)
-        loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
-        self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
+        x = freq.unsqueeze(1)
 
+        x_corrupt = self.augment(x)
+        x_hat = self(x_corrupt)
+
+        loss = self.loss_fn(x_hat, x)
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
         return loss
-        
-
     def test_step(self, batch, batch_idx):
         ppg, rr, freq, breath = batch
-        x = freq
-        x1 = self.augment(x)
-        x2 = self.augment(x)
-        z1, z2 = self(x1, x2)
-        loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
-        self.log('test_loss', loss, on_epoch=True, sync_dist=True)
-        return loss
+        x = freq.unsqueeze(1)
 
+        x_corrupt = self.augment(x)
+        x_hat = self(x_corrupt)
+
+        loss = self.loss_fn(x_hat, x)
+        self.log('test_loss', loss, on_epoch=True)
+        return loss
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
             self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.weight_decay
         )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.trainer.max_epochs,
-            eta_min=1e-5
-        )
-        return [optimizer], [scheduler]
+        return optimizer
+# class SSLModel(pl.LightningModule):
+
+#     def __init__(self, encoder: nn.Module, proj_dim=128, hidden_dim=256, learning_rate=1e-3, weight_decay=1e-5, temperature=0.07):
+#         super().__init__()
+#         self.save_hyperparameters()
+#         self.learning_rate = learning_rate
+#         self.weight_decay = weight_decay
+#         self.temperature = temperature
+#         self.encoder = encoder
+#         self.proj = ProjectionHead(encoder.rwkv.hidden_size, proj_dim, hidden_dim)
+#         self.augment = ScalogramAugment(
+#                  time_mask_ratio=0.15,
+#                  freq_mask_ratio=0.10,
+#                  num_time_masks=1,
+#                  num_freq_masks=1,
+#                  time_shift_frac=0.05,
+#                  amp_scale=(0.8, 1.2),
+#                  noise_std=0.01)
+
+    
+#     def forward(self, x1, x2):
+#         # x1, x2: (B, F, T) or (B, 1, F, T)
+#         z1 = self.proj(self.encoder(x1, return_embedding=True))  # (B, proj_dim)
+#         z2 = self.proj(self.encoder(x2, return_embedding=True))
+#         z1 = F.normalize(z1, dim=-1)
+#         z2 = F.normalize(z2, dim=-1)
+#         return z1, z2
+
+    
+#     def info_nce_loss(self, z1, z2, temperature=0.1):
+#         # z1, z2: (B, D) normalized
+#         B, D = z1.shape
+#         reps = torch.cat([z1, z2], dim=0)  # (2B, D)
+#         sim = torch.matmul(reps, reps.t()) / temperature  # (2B,2B)
+#         # mask self
+#         mask = torch.eye(2 * B, device=z1.device, dtype=torch.bool)
+#         sim.masked_fill_(mask, -1e9)
+
+#         targets = torch.arange(B, device=z1.device)
+#         targets = torch.cat([targets + B, targets], dim=0)  # positives indices
+
+#         loss = F.cross_entropy(sim, targets)
+#         return loss
+    
+#     def training_step(self, batch, batch_idx):
+#         # loss = self._shared_step(batch)
+#         # self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+#         # return loss# batch: (B, F, T) raw scalograms
+#         ppg, rr, freq, breath = batch
+#         x = freq
+#         x1 = self.augment(x)
+#         x2 = self.augment(x)
+#         z1, z2 = self(x1, x2)
+#         loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
+
+#         return loss
+
+#     def validation_step(self, batch, batch_idx):
+#         ppg, rr, freq, breath = batch
+#         x = freq
+#         x1 = self.augment(x)
+#         x2 = self.augment(x)
+#         z1, z2 = self(x1, x2)
+#         loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
+#         self.log('val_loss', loss, on_epoch=True, prog_bar=True, sync_dist=True)
+
+#         return loss
+        
+
+#     def test_step(self, batch, batch_idx):
+#         ppg, rr, freq, breath = batch
+#         x = freq
+#         x1 = self.augment(x)
+#         x2 = self.augment(x)
+#         z1, z2 = self(x1, x2)
+#         loss = self.info_nce_loss(z1, z2, temperature=self.temperature)
+#         self.log('test_loss', loss, on_epoch=True, sync_dist=True)
+#         return loss
+
+#     def configure_optimizers(self):
+#         optimizer = torch.optim.AdamW(
+#             self.parameters(),
+#             lr=self.learning_rate,
+#             weight_decay=self.weight_decay
+#         )
+#         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+#             optimizer,
+#             T_max=self.trainer.max_epochs,
+#             eta_min=1e-5
+#         )
+#         return [optimizer], [scheduler]
