@@ -479,12 +479,15 @@ class CNNRWKV(nn.Module):
             nn.Conv2d(64, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.Conv2d(128, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+            nn.Conv2d(128, 128, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),  
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            
+            nn.Conv2d(128, 256, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+
         )
-        self.bridge = nn.Linear(16 * 128, hidden_size)
+        self.bridge = nn.Linear(16 * 256, hidden_size)
         # self.tokenizer = ConvMixerTokenizer(
         #     dim=hidden_size, 
         #     depth=8, 
