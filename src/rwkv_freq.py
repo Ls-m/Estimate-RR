@@ -466,26 +466,30 @@ class ConvMixerTokenizer(nn.Module):
 class CNNRWKV(nn.Module):
     def __init__(self, hidden_size=256, num_layers=2, dropout=0.1):
         super().__init__()
-        # self.feature_extractor = nn.Sequential(
-        #     nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
-        #     nn.BatchNorm2d(32),
-        #     nn.ReLU(),
-        #     nn.Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(),
-        #     nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
-        #     nn.BatchNorm2d(64),
-        #     nn.ReLU(),
-        #     nn.Conv2d(64, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
-        #     nn.BatchNorm2d(128),
-        #     nn.ReLU(),
-        # )
-        # self.bridge = nn.Linear(32 * 128, hidden_size)
-        self.tokenizer = ConvMixerTokenizer(
-            dim=hidden_size, 
-            depth=8, 
-            kernel_size=7
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),  # Stride here
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            
         )
+        self.bridge = nn.Linear(16 * 128, hidden_size)
+        # self.tokenizer = ConvMixerTokenizer(
+        #     dim=hidden_size, 
+        #     depth=8, 
+        #     kernel_size=7
+        # )
         # --- 2. The "Brain" (RWKV Seq2Seq) ---
         self.rwkv = RWKV(
             input_size=hidden_size, 
@@ -493,32 +497,33 @@ class CNNRWKV(nn.Module):
             num_layers=num_layers, 
             dropout=dropout
         )
+        
     def forward(self, x, return_embedding=False):
         # Input x: (Batch, Freq=128, Time=60)
-        tokens = self.tokenizer(x) # -> (B, 60, Hidden)
+        # tokens = self.tokenizer(x) # -> (B, 60, Hidden)
         # 1. Add Channel Dimension for CNN -> (B, 1, 128, 60)
-        # if x.dim() == 3:
-        #     x = x.unsqueeze(1)
+        if x.dim() == 3:
+            x = x.unsqueeze(1)
             
-        # # 2. Extract Spectral Features
-        # # Output: (B, 64, 32, 60) -> (Batch, Channels, New_Freq, Time)
-        # features = self.feature_extractor(x)
+        # 2. Extract Spectral Features
+        # Output: (B, 64, 32, 60) -> (Batch, Channels, New_Freq, Time)
+        features = self.feature_extractor(x)
         
-        # # 3. Prepare for RWKV
-        # # We need (Batch, Time, Features)
-        # # Permute to (B, Time, Channels, New_Freq) -> (B, 60, 64, 32)
-        # features = features.permute(0, 3, 1, 2)
+        # 3. Prepare for RWKV
+        # We need (Batch, Time, Features)
+        # Permute to (B, Time, Channels, New_Freq) -> (B, 60, 64, 32)
+        features = features.permute(0, 3, 1, 2)
         
-        # # Flatten the feature vector for each time step
-        # B, T, C, F = features.shape
-        # features = features.reshape(B, T, C * F) # (B, 60, 2048)
+        # Flatten the feature vector for each time step
+        B, T, C, F = features.shape
+        features = features.reshape(B, T, C * F) # (B, 60, 2048)
         
-        # # Project to hidden size
-        # features = self.bridge(features) # (B, 60, Hidden)
+        # Project to hidden size
+        features = self.bridge(features) # (B, 60, Hidden)
         
 
         # 4. Run RWKV
-        seq_features = self.rwkv(tokens) 
+        seq_features = self.rwkv(features) 
         
         window_embedding = seq_features.mean(dim=1)
         return window_embedding
