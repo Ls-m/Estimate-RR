@@ -1,5 +1,5 @@
 seed: 42
-
+data_dir: "data/preprocessed/"
 preprocessing:
   bandpass_filter:
     type: "butter"  # Type of bandpass filter: "butter", "cheby1", etc.

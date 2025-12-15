@@ -74,7 +74,38 @@ def make_balanced_sampler(rr_targets):
     return sampler
 
 
-    
+
+import torch
+from torch.utils.data import Dataset
+
+class PPGRRDatasetFromDisk(Dataset):
+    def __init__(self, fold_file, split):
+        """
+        fold_file: path to saved fold_X.pt
+        split: 'train', 'val', or 'test'
+        """
+        super().__init__()
+
+        assert split in ["train", "val", "test"]
+
+        # Load only metadata once
+        self.data = torch.load(fold_file, map_location="cpu")[split]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        sample = self.data[idx]
+
+        # Adjust keys if needed
+        freq = sample["freq"]        # (128, 60)
+        rr   = sample["rr"]
+        ppg  = sample.get("ppg", None)
+        breath = sample.get("breath", None)
+
+        return ppg, rr, freq, breath
+
+
 class PPGRRDataset(torch.utils.data.Dataset):
     def __init__(self, cfg, ppg_data, rr_labels, freq_data, breath_labels, augment=False):
         # ... existing init ...
@@ -85,6 +116,7 @@ class PPGRRDataset(torch.utils.data.Dataset):
         self.breath_data = breath_labels
         self.cfg = cfg
 
+        
         if np.any(np.isnan(ppg_data)) or np.any(np.isinf(ppg_data)):
             logger.info(f"nan or inf in ppg_data")
         
@@ -179,6 +211,8 @@ class PPGRRDataModule(LightningDataModule):
         self.test_dataset = test_dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
+
+        
 
     def train_dataloader(self):
         # Example: accessing labels directly from the stored list in dataset
