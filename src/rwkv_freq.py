@@ -484,7 +484,7 @@ class CNNRWKV(nn.Module):
             nn.ReLU(),
 
         )
-        self.bridge = nn.Linear(1920, hidden_size)
+        self.bridge = nn.Linear(2048, hidden_size)
         # self.tokenizer = ConvMixerTokenizer(
         #     dim=hidden_size, 
         #     depth=8, 
