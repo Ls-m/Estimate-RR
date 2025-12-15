@@ -202,7 +202,7 @@ class RWKV(nn.Module):
     def forward(self, x: torch.Tensor, state: Optional[list] = None) -> torch.Tensor:
         """Forward pass through RWKV."""
         # Input projection
-        # x = self.input_proj(x)
+        x = self.input_proj(x)
         
         # Process through RWKV blocks
         states = []
