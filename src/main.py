@@ -1408,7 +1408,7 @@ def balance_dataset_with_synthesis(ppg_list, breath_list):
     
     return final_ppg, final_breath
 
-def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
+def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 64), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
     """
     Generates a CWT scalogram optimized for Seq2Seq RWKV.
     
@@ -3195,7 +3195,7 @@ def main(cfg: DictConfig):
 
 
     # cv_splits = create_balanced_folds(processed_data, n_splits=5)
-    cv_splits = create_folds(processed_data_capnobase, n_splits=5)
+    cv_splits = create_folds(processed_data, n_splits=5)
     logger.info(f"Created folds: {cv_splits}")
 
 
@@ -3205,7 +3205,7 @@ def main(cfg: DictConfig):
         all_test_subjects.update(fold["test_subjects"])
 
     # Collect all subjects in the dataset
-    all_subjects = set(processed_data_capnobase.keys())
+    all_subjects = set(processed_data.keys())
 
     # Check coverage
     missing_subjects = all_subjects - all_test_subjects
@@ -3216,7 +3216,7 @@ def main(cfg: DictConfig):
     print(f"🧩 Missing subjects in test folds: {missing_subjects if missing_subjects else 'None'}")
     print(f"⚠️ Unexpected subjects: {extra_subjects if extra_subjects else 'None'}")
 
-    all_fold_results = train(cfg, cv_splits, processed_data_capnobase, processed_capnobase_ssl, processed_data)
+    all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_data_capnobase)
     
     for fold_result in all_fold_results:
         logger.info(f"Fold {fold_result['fold_id']} test results: {fold_result['test_results']}")
