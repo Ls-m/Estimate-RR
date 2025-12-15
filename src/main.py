@@ -2767,28 +2767,28 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
         logger.info(f"--- Starting Fold {fold_id} ---")
 
         fold_data = create_data_splits(cfg, cv_split, processed_data, processed_data_capnobase)
-        torch.save(
-            fold_data,
-            f"{cfg.data_dir}/fold_{cv_split["fold_id"]}.pt"
-        )
+        # torch.save(
+        #     fold_data,
+        #     f"{cfg.data_dir}/fold_{cv_split["fold_id"]}.pt"
+        # )
         # logger.info(f"\nSTEP 2: Analyzing AUGMENTED data for Fold {fold_id}...")
         # analyze_fold_distribution_after_augmentation(fold_id, fold_data)
-        # if cfg.training.ablation_mode == 'freq_only':
-        #     train_dataset = PPGRRDataset(cfg,fold_data['train_freq'], fold_data['train_breath'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
-        # else:
-        #     train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_breath'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
-
-        # val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'], fold_data['val_breath'], augment=False)
-        # test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'], fold_data['test_breath'], augment=False)
-
-        fold_file = f"{cfg.data_dir}/fold_{cv_split["fold_id"]}.pt"
         if cfg.training.ablation_mode == 'freq_only':
-            train_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="train")
+            train_dataset = PPGRRDataset(cfg,fold_data['train_freq'], fold_data['train_breath'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
         else:
-            train_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="train")
+            train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_breath'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
 
-        val_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="val")
-        test_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="test")
+        val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'], fold_data['val_breath'], augment=False)
+        test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'], fold_data['test_breath'], augment=False)
+
+        # fold_file = f"{cfg.data_dir}/fold_{cv_split['fold_id']}.pt"
+        # if cfg.training.ablation_mode == 'freq_only':
+        #     train_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="train")
+        # else:
+        #     train_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="train")
+
+        # val_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="val")
+        # test_dataset = PPGRRDatasetFromDisk(fold_file=f"{cfg.data_dir}/fold_{cv_split}.pt", split="test")
 
         batch_size = cfg.training.batch_size
         num_workers = cfg.training.num_workers
