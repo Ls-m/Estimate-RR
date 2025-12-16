@@ -3245,7 +3245,9 @@ def main(cfg: DictConfig):
     print(f"\nTraining completed!")
     print(f"all fold results: {all_fold_results}")
     all_maes = [fold_result['test_results']['test/MAE'] for fold_result in all_fold_results]
+    all_pcc = [fold_result['test_results']['test/PCC'] for fold_result in all_fold_results]
     print(f"Average MAE across folds: {np.mean(all_maes):.4f} ± {np.std(all_maes):.4f}")
+    print(f"Average PCC across folds: {np.mean(all_pcc):.4f} ± {np.std(all_pcc):.4f}")
     print("Hello, World!")
 
 
