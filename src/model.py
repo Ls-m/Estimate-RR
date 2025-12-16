@@ -1015,7 +1015,8 @@ class RRLightningModule(pl.LightningModule):
         # self.test_mae_metric = torchmetrics.MeanAbsoluteError().to(self.device)
         metrics = {
             "MAE": torchmetrics.MeanAbsoluteError(),
-            "MSE": torchmetrics.MeanSquaredError()
+            "MSE": torchmetrics.MeanSquaredError(),
+            "PCC": torchmetrics.PearsonCorrCoef()
         }
         self.train_metrics = torchmetrics.MetricCollection(metrics, prefix="train/")
         self.val_metrics = torchmetrics.MetricCollection(metrics, prefix="val/")
