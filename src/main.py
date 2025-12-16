@@ -1972,8 +1972,8 @@ def create_folds(processed_data, n_splits=10, seed=42):
     kfold = KFold(n_splits=n_splits, shuffle=False, random_state=None)  # Already shuffled
     cv_splits = []
     for fold_id, (train_indices, val_indices) in enumerate(kfold.split(trainval_subjects)):
-        train_subjects = shuffled_subjects[train_indices].tolist()
-        val_subjects = shuffled_subjects[val_indices].tolist()
+        train_subjects = trainval_subjects[train_indices].tolist()
+        val_subjects = trainval_subjects[val_indices].tolist()
         
         # n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
         # # n_val_subjects = len(test_subjects)
