@@ -30,7 +30,7 @@ import json
 from pytorch_lightning.strategies import DDPStrategy
 from skimage.transform import resize
 import torch.distributed as dist
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 import random
 from skimage.transform import resize
 from model import FreqSSLPretrainModule
@@ -1409,7 +1409,7 @@ def balance_dataset_with_synthesis(ppg_list, breath_list):
     
     return final_ppg, final_breath
 
-def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 64), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
+def generate_cwt_scalogram(ppg_segment, fs=125, target_shape=(128, 60), fmin=0.1, fmax=0.8, wavelet='morl', use_fake=False):
     """
     Generates a CWT scalogram optimized for Seq2Seq RWKV.
     
@@ -1963,18 +1963,23 @@ def create_folds(processed_data, n_splits=10, seed=42):
     shuffled_indices = np.random.permutation(len(list(all_subjects)))
     shuffled_subjects = subjects_array[shuffled_indices]
     
+    trainval_subjects, test_subjects = train_test_split(
+        shuffled_subjects,
+        test_size=0.10
+
+    )
     # Create k-fold splits
     kfold = KFold(n_splits=n_splits, shuffle=False, random_state=None)  # Already shuffled
     cv_splits = []
-    for fold_id, (train_val_indices, test_indices) in enumerate(kfold.split(shuffled_subjects)):
-        train_val_subjects = shuffled_subjects[train_val_indices].tolist()
-        test_subjects = shuffled_subjects[test_indices].tolist()
+    for fold_id, (train_indices, val_indices) in enumerate(kfold.split(trainval_subjects)):
+        train_subjects = shuffled_subjects[train_indices].tolist()
+        val_subjects = shuffled_subjects[val_indices].tolist()
         
-        n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
-        # n_val_subjects = len(test_subjects)
-        random.seed(seed + fold_id)  # make per-fold val split deterministic
-        val_subjects = random.sample(train_val_subjects, n_val_subjects)
-        train_subjects = [s for s in train_val_subjects if s not in val_subjects]
+        # n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
+        # # n_val_subjects = len(test_subjects)
+        # random.seed(seed + fold_id)  # make per-fold val split deterministic
+        # val_subjects = random.sample(train_val_subjects, n_val_subjects)
+        # train_subjects = [s for s in train_val_subjects if s not in val_subjects]
         
 
         test_set = set(test_subjects)

@@ -479,9 +479,9 @@ class CNNRWKV(nn.Module):
             nn.Conv2d(64, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  # Another stride
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.Conv2d(128, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
+            # nn.Conv2d(128, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),  
+            # nn.BatchNorm2d(128),
+            # nn.ReLU(),
 
         )
         self.bridge = nn.Linear(2048, hidden_size)
