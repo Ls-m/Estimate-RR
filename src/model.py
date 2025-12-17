@@ -1798,7 +1798,7 @@ class SSLJigsawModel(pl.LightningModule):
         self.save_hyperparameters()
 
         self.encoder = encoder
-        self.jigsaw = JigsawGenerator(grid_size=2, num_permutations=num_permutations)
+        self.jigsaw = JigsawGenerator(num_permutations=num_permutations)
 
         self.head = nn.Sequential(
             nn.Linear(latent_dim, latent_dim // 2),
