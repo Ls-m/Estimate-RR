@@ -1963,26 +1963,26 @@ def create_folds(processed_data, n_splits=10, seed=42):
     shuffled_indices = np.random.permutation(len(list(all_subjects)))
     shuffled_subjects = subjects_array[shuffled_indices]
     
-    # trainval_subjects, test_subjects = train_test_split(
-    #     shuffled_subjects,
-    #     test_size=0.10
+    trainval_subjects, test_subjects = train_test_split(
+        shuffled_subjects,
+        test_size=0.10
 
-    # )
+    )
     # Create k-fold splits
     kfold = KFold(n_splits=n_splits, shuffle=False, random_state=None)  # Already shuffled
     cv_splits = []
-    for fold_id, (train_val_indices, test_indices) in enumerate(kfold.split(shuffled_subjects)):
-        train_val_subjects = shuffled_subjects[train_val_indices].tolist()
-        test_subjects = shuffled_subjects[test_indices].tolist()
-    # for fold_id, (train_indices, val_indices) in enumerate(kfold.split(trainval_subjects)):
-    #     train_subjects = trainval_subjects[train_indices].tolist()
-    #     val_subjects = trainval_subjects[val_indices].tolist()
+    # for fold_id, (train_val_indices, test_indices) in enumerate(kfold.split(shuffled_subjects)):
+    #     train_val_subjects = shuffled_subjects[train_val_indices].tolist()
+    #     test_subjects = shuffled_subjects[test_indices].tolist()
+    for fold_id, (train_indices, val_indices) in enumerate(kfold.split(trainval_subjects)):
+        train_subjects = trainval_subjects[train_indices].tolist()
+        val_subjects = trainval_subjects[val_indices].tolist()
         
-        n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
-        # n_val_subjects = len(test_subjects)
-        random.seed(seed + fold_id)  # make per-fold val split deterministic
-        val_subjects = random.sample(train_val_subjects, n_val_subjects)
-        train_subjects = [s for s in train_val_subjects if s not in val_subjects]
+        # n_val_subjects = max(1, int(len(train_val_subjects) * 0.2))
+        # # n_val_subjects = len(test_subjects)
+        # random.seed(seed + fold_id)  # make per-fold val split deterministic
+        # val_subjects = random.sample(train_val_subjects, n_val_subjects)
+        # train_subjects = [s for s in train_val_subjects if s not in val_subjects]
         
 
         test_set = set(test_subjects)
@@ -3217,7 +3217,7 @@ def main(cfg: DictConfig):
 
 
     # cv_splits = create_balanced_folds(processed_data, n_splits=5)
-    cv_splits = create_folds(processed_data, n_splits=53)
+    cv_splits = create_folds(processed_data, n_splits=5)
     logger.info(f"Created folds: {cv_splits}")
 
 
