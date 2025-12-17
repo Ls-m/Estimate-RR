@@ -1776,10 +1776,32 @@ class JigsawGenerator:
         x_perm = []
         for b in range(B):
             order = self.permutations[perm_indices[b]]
-            row = []
-            for idx in order:
-                row.append(patches[idx][b:b+1])
-            x_perm.append(torch.cat(row, dim=3))
+            
+            # --- CORRECTION STARTS HERE ---
+            # We must rebuild the grid (grid_f rows, grid_t cols)
+            
+            grid_rows = []
+            patch_idx = 0
+            
+            # Iterate over the rows we expect (grid_f = 2)
+            for _ in range(self.grid_f):
+                current_row_patches = []
+                
+                # Iterate over the columns we expect (grid_t = 3)
+                for _ in range(self.grid_t):
+                    # Get the specific patch based on the permutation order
+                    p_idx = order[patch_idx]
+                    current_row_patches.append(patches[p_idx][b:b+1])
+                    patch_idx += 1
+                
+                # Concatenate this row along Time (dim 3)
+                # Result shape: (1, 1, 64, 60)
+                grid_rows.append(torch.cat(current_row_patches, dim=3))
+            
+            # Concatenate the rows along Freq (dim 2)
+            # Result shape: (1, 1, 128, 60) -> Back to original shape!
+            x_perm.append(torch.cat(grid_rows, dim=2))
+            # --- CORRECTION ENDS HERE ---
 
         x_perm = torch.cat(x_perm, dim=0)
         return x_perm, perm_indices
