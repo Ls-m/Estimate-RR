@@ -49,7 +49,7 @@ import scipy.io as sio
 import h5py
 from scipy.signal import resample_poly
 from rwkv_freq import CNNRWKV
-from model import SSLModel
+from model import SSLModel, SSLJigsawModel
 from dataset import PPGRRDatasetFromDisk
 logger = logging.getLogger("ReadData")
 
@@ -2847,7 +2847,10 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
                 logger.info(f"[Fold {fold_id}] Starting FREQ Contrastive SSL Pre-training")
                 
                 encoder = CNNRWKV(hidden_size=cfg.training.hidden_size, num_layers=cfg.training.num_layers, dropout=cfg.training.dropout)
-                ssl_model = SSLModel(
+                # ssl_model = SSLModel(
+                #     encoder=encoder
+                # )
+                ssl_model = SSLJigsawModel(
                     encoder=encoder
                 )
                 pretrained_path = f"fold_{fold_id}_ssl_encoder.pth"

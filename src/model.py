@@ -23,6 +23,7 @@ import seaborn as sns
 import pandas as pd
 from rwkv_freq import RWKVScalogramModel
 from mamba import MambaScalogramModel
+import itertools
 
 def ppg_augmentation(x, crop_ratio=0.8):
     """
@@ -1742,3 +1743,110 @@ class SSLModel(pl.LightningModule):
 #             eta_min=1e-5
 #         )
 #         return [optimizer], [scheduler]
+
+class JigsawGenerator:
+    def __init__(self, grid_f=2, grid_t=3, num_permutations=50):
+        self.grid_f = grid_f
+        self.grid_t = grid_t
+
+        n_patches = grid_f * grid_t
+        perms = list(itertools.permutations(range(n_patches)))
+        random.shuffle(perms)
+        self.permutations = perms[:num_permutations]
+
+    def __call__(self, x):
+        # x: (B, 1, 128, 60)
+        B, C, F, T = x.shape
+        f_step = F // self.grid_f
+        t_step = T // self.grid_t
+
+        patches = []
+        for i in range(self.grid_f):
+            for j in range(self.grid_t):
+                patches.append(
+                    x[:, :, 
+                      i*f_step:(i+1)*f_step,
+                      j*t_step:(j+1)*t_step]
+                )
+
+        perm_indices = torch.randint(
+            0, len(self.permutations), (B,), device=x.device
+        )
+
+        x_perm = []
+        for b in range(B):
+            order = self.permutations[perm_indices[b]]
+            row = []
+            for idx in order:
+                row.append(patches[idx][b:b+1])
+            x_perm.append(torch.cat(row, dim=3))
+
+        x_perm = torch.cat(x_perm, dim=0)
+        return x_perm, perm_indices
+    
+class SSLJigsawModel(pl.LightningModule):
+
+    def __init__(
+        self,
+        encoder: nn.Module,
+        latent_dim=1024,
+        num_permutations=24,
+        learning_rate=1e-3,
+        weight_decay=1e-5,
+    ):
+        super().__init__()
+        self.save_hyperparameters()
+
+        self.encoder = encoder
+        self.jigsaw = JigsawGenerator(grid_size=2, num_permutations=num_permutations)
+
+        self.head = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim // 2),
+            nn.ReLU(),
+            nn.Linear(latent_dim // 2, num_permutations)
+        )
+
+        self.loss_fn = nn.CrossEntropyLoss()
+    
+    def forward(self, x):
+        z = self.encoder(x, return_embedding=True)
+        logits = self.head(z)
+        return logits
+    
+    def training_step(self, batch, batch_idx):
+        _, _, freq, _ = batch
+        x = freq.unsqueeze(1)
+
+        x_perm, labels = self.jigsaw(x)
+        logits = self(x_perm)
+
+        loss = self.loss_fn(logits, labels)
+        acc = (logits.argmax(dim=1) == labels).float().mean()
+
+        self.log_dict({
+            'train_loss': loss,
+            'train_acc': acc
+        }, prog_bar=True)
+
+        return loss
+    def validation_step(self, batch, batch_idx):
+        _, _, freq, _ = batch
+        x = freq.unsqueeze(1)
+
+        x_perm, labels = self.jigsaw(x)
+        logits = self(x_perm)
+
+        loss = self.loss_fn(logits, labels)
+        acc = (logits.argmax(dim=1) == labels).float().mean()
+
+        self.log_dict({
+            'val_loss': loss,
+            'val_acc': acc
+        }, prog_bar=True)
+
+    def configure_optimizers(self):
+        return torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.weight_decay
+        )
