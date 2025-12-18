@@ -1,0 +1,355 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Optional, Tuple
+import math
+
+class RWKVBlock(nn.Module):
+    """Single RWKV block with time mixing and channel mixing."""
+    
+    def __init__(self, d_model: int, dropout: float = 0.1):
+        super().__init__()
+        self.d_model = d_model
+        
+        # Time mixing parameters
+        self.time_decay = nn.Parameter(torch.randn(d_model))
+        self.time_first = nn.Parameter(torch.randn(d_model))
+        
+        # Time mixing layers
+        self.time_mix_k = nn.Linear(d_model, d_model, bias=False)
+        self.time_mix_v = nn.Linear(d_model, d_model, bias=False)
+        self.time_mix_r = nn.Linear(d_model, d_model, bias=False)
+        
+        # Channel mixing layers  
+        self.channel_mix_k = nn.Linear(d_model, d_model * 4, bias=False)
+        self.channel_mix_v = nn.Linear(d_model * 4, d_model, bias=False)
+        self.channel_mix_r = nn.Linear(d_model, d_model, bias=False)
+        
+        # Layer normalization
+        self.ln1 = nn.LayerNorm(d_model)
+        self.ln2 = nn.LayerNorm(d_model)
+        
+        # Dropout
+        # self.dropout = nn.Dropout(dropout)
+        
+        # Time shift mixing ratios
+        self.time_mix_k_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        self.time_mix_v_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        self.time_mix_r_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        
+        self.channel_mix_k_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        self.channel_mix_r_ratio = nn.Parameter(torch.ones(1, 1, d_model))
+        
+    def time_shift(self, x: torch.Tensor, mix_ratio: torch.Tensor) -> torch.Tensor:
+        """Apply time shifting with learnable mixing ratio."""
+        B, T, C = x.size()
+        
+        if T == 1:
+            return x
+        
+        # Shift: [x0, x1, x2, ...] -> [0, x0, x1, ...]
+        x_prev = torch.cat([torch.zeros(B, 1, C, device=x.device, dtype=x.dtype), 
+                           x[:, :-1, :]], dim=1)
+        
+        # Mix current and previous
+        return x * mix_ratio + x_prev * (1 - mix_ratio)
+    
+    def wkv_computation(self, w: torch.Tensor, u: torch.Tensor, 
+                       k: torch.Tensor, v: torch.Tensor, 
+                       state: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Simplified but correct WKV operation."""
+        B, T, C = k.size()
+        device = k.device
+        dtype = k.dtype
+        
+        # Initialize output
+        output = torch.zeros_like(v)
+        
+        # Initialize or use provided state [aa, bb, pp]
+        if state is None:
+            aa = torch.zeros(B, C, device=device, dtype=dtype)
+            bb = torch.zeros(B, C, device=device, dtype=dtype) - float('inf')
+            pp = torch.zeros(B, C, device=device, dtype=dtype) - float('inf')
+        else:
+            aa, bb, pp = state[:, :, 0], state[:, :, 1], state[:, :, 2]
+        
+        # Process each time step
+        for t in range(T):
+            kk = k[:, t, :]  # (B, C)
+            vv = v[:, t, :]  # (B, C)
+            
+            # Compute WKV for this timestep
+            ww = u + kk
+            p = torch.maximum(pp, ww)
+            e1 = torch.exp(pp - p)
+            e2 = torch.exp(ww - p)
+            
+            # Output for this timestep
+            output[:, t, :] = (e1 * aa + e2 * vv) / (e1 + e2 + 1e-8)  # Add small epsilon for stability
+            
+            # Update state for next timestep
+            ww = w + pp
+            p = torch.maximum(pp, kk)
+            e1 = torch.exp(pp - p)
+            e2 = torch.exp(kk - p)
+            
+            aa = e1 * aa + e2 * vv
+            pp = p + torch.log(e1 + e2 + 1e-8)  # Add small epsilon for stability
+            bb = ww  # Not used in this simplified version but kept for completeness
+        
+        # Return output and final state
+        final_state = torch.stack([aa, bb, pp], dim=2)  # (B, C, 3)
+        return output, final_state
+    
+    def time_mixing(self, x: torch.Tensor, state: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Time mixing operation."""
+        B, T, C = x.size()
+        
+        # Apply time shift mixing
+        xk = self.time_shift(x, self.time_mix_k_ratio)
+        xv = self.time_shift(x, self.time_mix_v_ratio)
+        xr = self.time_shift(x, self.time_mix_r_ratio)
+        
+        # Compute key, value, receptance
+        k = self.time_mix_k(xk)
+        v = self.time_mix_v(xv)
+        r = self.time_mix_r(xr)
+        
+        # Apply sigmoid to receptance
+        r = torch.sigmoid(r)
+        
+        # WKV operation
+        w = -torch.exp(self.time_decay)  # Decay weights (negative)
+        u = self.time_first                # First step weights
+        
+        wkv_out, new_state = self.wkv_computation(w, u, k, v, state)
+        
+        return r * wkv_out, new_state
+    
+    def channel_mixing(self, x: torch.Tensor) -> torch.Tensor:
+        """Channel mixing operation."""
+        # Apply time shift mixing for channel mixing
+        xk = self.time_shift(x, self.channel_mix_k_ratio)
+        xr = self.time_shift(x, self.channel_mix_r_ratio)
+        
+        k = self.channel_mix_k(xk)
+        r = self.channel_mix_r(xr)
+        
+        # Apply squared ReLU activation
+        vv = self.channel_mix_v(F.relu(k) ** 2)
+        
+        return torch.sigmoid(r) * vv
+    
+    def forward(self, x: torch.Tensor, state: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass through RWKV block."""
+        # Time mixing with residual connection
+        tm_out, new_state = self.time_mixing(self.ln1(x), state)
+        # x = x + self.dropout(tm_out)
+        x = x + tm_out
+        
+        # Channel mixing with residual connection
+        cm_out = self.channel_mixing(self.ln2(x))
+        # x = x + self.dropout(cm_out)
+        x = x + cm_out
+        
+        return x, new_state
+
+
+class RWKV(nn.Module):
+    """Multi-layer RWKV model for time series."""
+
+    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2,
+                 dropout: float = 0.1):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # Input projection
+        self.input_proj = nn.Linear(input_size, hidden_size)
+        
+        # RWKV blocks
+        self.blocks = nn.ModuleList([
+            RWKVBlock(hidden_size, dropout) for _ in range(num_layers)
+        ])
+        
+        # Output layer norm
+        self.ln_out = nn.LayerNorm(hidden_size)
+        
+        # Initialize parameters
+        self.apply(self._init_weights)
+    
+    def _init_weights(self, module):
+        """Initialize weights with proper scaling."""
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.LayerNorm):
+            torch.nn.init.zeros_(module.bias)
+            torch.nn.init.ones_(module.weight)
+        elif isinstance(module, nn.Parameter):
+            if 'time_decay' in str(module):
+                # Initialize time decay to reasonable values
+                torch.nn.init.uniform_(module, -4.0, -1.0)
+            elif 'time_first' in str(module):
+                # Initialize time first to small positive values
+                torch.nn.init.uniform_(module, 0.0, 1.0)
+            elif 'mix_ratio' in str(module):
+                # Initialize mixing ratios to 0.5 (equal mix)
+                torch.nn.init.constant_(module, 0.5)
+    
+    def forward(self, x: torch.Tensor, state: Optional[list] = None) -> torch.Tensor:
+        """Forward pass through RWKV."""
+        # Input projection
+        x = self.input_proj(x)
+        
+        # Process through RWKV blocks
+        states = []
+        for i, block in enumerate(self.blocks):
+            block_state = state[i] if state is not None else None
+            x, new_state = block(x, block_state)
+            states.append(new_state)
+        
+        # Output normalization
+        x = self.ln_out(x)
+        
+        # Return final representation (last time step) - SAME AS YOUR ORIGINAL
+        return x  # Shape: (Batch, Time, Hidden_Size)
+        # return x  # (batch_size, hidden_size)
+
+class BiAxisCNNRWKV(nn.Module):
+    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1):
+        super().__init__()
+        
+        # --- 1. Feature Extractor (Same as before) ---
+        # Reduces Freq dim from 128 -> 32. Time stays 60.
+        # Channels go 1 -> 128.
+        self.feature_extractor = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 1), padding=(1, 1)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=(3, 1), stride=(1, 1), padding=(1, 0)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=(3, 1), stride=(2, 1), padding=(1, 0)),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        )
+
+        # --- 2. The Bridge (Innovation Step 1) ---
+        # Instead of flattening Freq (4096->Hidden), we project Channels (128->Hidden).
+        # We KEEP the Frequency spatial dimension.
+        # Input: (B, 128, 32, 60) -> Output: (B, Hidden, 32, 60)
+        self.bridge = nn.Conv2d(128, hidden_size, kernel_size=1)
+
+        # --- 3. Dual-Axis RWKV (Innovation Step 2) ---
+        
+        # Axis 1: Time Mixer (Scans Left-to-Right)
+        self.rwkv_time = RWKV(
+            input_size=hidden_size, 
+            hidden_size=hidden_size, 
+            num_layers=num_layers, 
+            dropout=dropout
+        )
+        
+        # Axis 2: Frequency Mixer (Scans Bottom-to-Top)
+        self.rwkv_freq = RWKV(
+            input_size=hidden_size, 
+            hidden_size=hidden_size, 
+            num_layers=num_layers, 
+            dropout=dropout
+        )
+        
+        # Fusion Layer (Combines the two views)
+        self.fusion = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, x, return_embedding=False):
+        # x: (Batch, Freq=128, Time=60)
+        if x.dim() == 3:
+            x = x.unsqueeze(1)
+            
+        # 1. Extract Features -> (B, 128, 32, 60)
+        feat = self.feature_extractor(x)
+        
+        # 2. Project to Hidden Size while keeping Grid -> (B, Hidden, 32, 60)
+        feat = self.bridge(feat)
+        
+        # Rearrange to: (Batch, Freq, Time, Hidden) for easier slicing
+        # B=Batch, C=Hidden, F=Freq(32), T=Time(60)
+        feat = feat.permute(0, 2, 3, 1) # (B, 32, 60, Hidden)
+        B, F, T, H = feat.shape
+        
+        # --- PATH A: TIME MIXING ---
+        # We want to treat every Frequency bin as an independent sequence
+        # View: (Batch * Freq, Time, Hidden)
+        x_time = feat.reshape(B * F, T, H)
+        x_time = self.rwkv_time(x_time) # -> (B*F, T, H)
+        x_time = x_time.reshape(B, F, T, H)
+        
+        # --- PATH B: FREQUENCY MIXING ---
+        # We want to treat every Time step as an independent sequence
+        # Transpose so Freq is the "sequence" dimension
+        x_freq = feat.permute(0, 2, 1, 3) # (B, Time, Freq, Hidden)
+        x_freq = x_freq.reshape(B * T, F, H)
+        x_freq = self.rwkv_freq(x_freq) # -> (B*T, F, H)
+        x_freq = x_freq.reshape(B, T, F, H).permute(0, 2, 1, 3) # Back to (B, F, T, H)
+        
+        # --- 3. Fusion & Pooling ---
+        # Combine both insights (Element-wise addition + projection)
+        # Note: You could also Concatenate, but Addition preserves dim
+        x_combined = self.fusion(x_time + x_freq)
+        
+        # Global Pooling
+        # We pool over BOTH Time and Frequency to get the final window embedding
+        # (B, F, T, H) -> (B, H)
+        window_embedding = x_combined.mean(dim=(1, 2))
+        
+        return window_embedding
+    
+class RWKVScalogramModel(nn.Module):
+    def __init__(self, hidden_size=256, num_layers=2, dropout=0.1, output_size=1, mode='freq_only'):
+        super().__init__()
+        
+        # USE THE NEW BI-AXIS CLASS
+        self.encoder = BiAxisCNNRWKV(
+            hidden_size=hidden_size, 
+            num_layers=num_layers, 
+            dropout=dropout
+        )
+
+        if mode == "freq_only":
+            # --- 3. The Head ---
+            self.head = nn.Sequential(
+                nn.Linear(hidden_size, 512),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(512, 128),
+                nn.ReLU(),
+                nn.Linear(128, output_size)
+            )
+        else:
+            self.head = nn.Sequential(
+                nn.Linear(hidden_size, 512),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(512, output_size),
+            )
+
+
+    def forward(self, x):
+        window_embedding = self.encoder(x)
+        
+        # window_embedding = seq_features.mean(dim=1)  # (B, Hidden)
+        # 5. Apply Temporal Attention Pooling (REPLACED global average pooling)
+        # window_embedding, attn_weights = self.temporal_attention(seq_features)  # (B, Hidden)
+        # Predict RR for the window
+        out = self.head(window_embedding)
+        # 5. Apply Head
+        # out = self.head(seq_features)
+        
+        # return out.squeeze(-1)
+        return out

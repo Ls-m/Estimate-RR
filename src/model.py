@@ -21,7 +21,8 @@ from transformer import CNNTransformerRegressor
 from tcn import TCNScalogramModel
 import seaborn as sns
 import pandas as pd
-from rwkv_freq import RWKVScalogramModel
+# from rwkv_freq import RWKVScalogramModel
+from rwkv_freq2 import RWKVScalogramModel
 from mamba import MambaScalogramModel
 import itertools
 
@@ -1139,7 +1140,7 @@ class RRLightningModule(pl.LightningModule):
             fusion_dim += self.cfg.freq_model_output_dim
             # 2. Load Pretrained Weights (NEW LOGIC)
             # Only load if we are in freq_only mode (or handle fusion logic separately)
-            if self.ablation_mode == "freq_only" and cfg.training.get("pretrained_path"):
+            if self.ablation_mode == "freq_only" and cfg.training.get("pretrained_path") and cfg.training.use_ssl_pretraining:
                 pretrained_path = cfg.training.get("pretrained_path")
                 print(f"Loading pretrained FREQ Timewarp encoder from: {pretrained_path}")
                 
