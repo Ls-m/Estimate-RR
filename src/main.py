@@ -2888,7 +2888,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
             if cfg.training.ablation_mode == "time_only":
                 best_model = SSLModel.load_from_checkpoint(best_ssl_model_path)
             else: 
-                best_model = SSLModel.load_from_checkpoint(best_ssl_model_path)
+                best_model = SSLJigsawModel.load_from_checkpoint(best_ssl_model_path)
 
             if not dist.is_initialized() or dist.get_rank() == 0:
                 # Both modules have self.encoder, so this line works for both
