@@ -5,7 +5,7 @@ import torch
 from pytorch_lightning import LightningDataModule
 import random
 logger = logging.getLogger("Dataset")
-
+from torch.utils.data.dataloader import default_collate
 import torchaudio.transforms as T
 
 
@@ -243,13 +243,48 @@ class PPGRRDataModule(LightningDataModule):
         return torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True, worker_init_fn=worker_init_fn)
     
 class FullSSLDataModule(LightningDataModule):
-    def __init__(self, train_set, val_set, batch_size, num_workers):
+    def __init__(self, train_set, val_set, batch_size, num_workers, target_time=60):
         super().__init__()
         # 1. Merge Train and Validation completely
         self.full_dataset = torch.utils.data.ConcatDataset([train_set, val_set])
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.target_time = target_time
 
+    def safe_collate(self, batch):
+        """
+        Forces all spectrograms in the batch to have T=target_time.
+        Batch structure is list of tuples: [(ppg, rr, freq, breath), ...]
+        """
+        processed_batch = []
+        
+        for item in batch:
+            # Unpack the item (adjust based on your actual dataset return)
+            # Assuming item[2] is the spectrogram (Freq, Time)
+            ppg, rr, freq, breath = item
+            
+            # --- Fix Spectrogram (Freq) ---
+            # freq shape is usually (128, T)
+            current_time = freq.shape[-1]
+            
+            if current_time > self.target_time:
+                # Crop: Take center or beginning
+                freq = freq[..., :self.target_time]
+            elif current_time < self.target_time:
+                # Pad: Add zeros to the end
+                pad_amt = self.target_time - current_time
+                freq = torch.nn.functional.pad(freq, (0, pad_amt))
+                
+            # --- Fix Signals (PPG/Breath) if necessary ---
+            # If PPG/Breath are arrays matching the spectrogram time, 
+            # you might need to crop them too. If they are just scalars/labels, ignore.
+            # Example assuming PPG is 1D signal:
+            # if ppg.shape[-1] > some_length: ppg = ppg[..., :some_length]
+
+            processed_batch.append((ppg, rr, freq, breath))
+            
+        return default_collate(processed_batch)
+    
     def train_dataloader(self):
         return torch.utils.data.DataLoader(
             self.full_dataset, 
@@ -257,7 +292,8 @@ class FullSSLDataModule(LightningDataModule):
             shuffle=True, 
             num_workers=self.num_workers,
             pin_memory=True,
-            drop_last=True 
+            drop_last=True,
+            collate_fn=self.safe_collate  # <--- Attach the fix here
         )
 
     # 2. RETURN NONE for validation to disable the loop
