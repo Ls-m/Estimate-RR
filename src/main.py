@@ -2882,7 +2882,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
                 train_dataset, 
                 val_dataset, 
                 batch_size=cfg.training.batch_size, 
-                num_workers=cfg.hardware.num_workers
+                num_workers= num_workers
             )
             
             # ssl_trainer = pl.Trainer(
