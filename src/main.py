@@ -2786,8 +2786,8 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
         else:
             train_dataset = PPGRRDataset(cfg,fold_data['train_ppg'], fold_data['train_breath'], fold_data['train_freq'], fold_data['train_breath'], augment=cfg.training.use_augmentation)
 
-        val_dataset = PPGRRDataset(cfg,fold_data['val_ppg'], fold_data['val_rr'], fold_data['val_freq'], fold_data['val_breath'], augment=False)
-        test_dataset = PPGRRDataset(cfg,fold_data['test_ppg'], fold_data['test_rr'], fold_data['test_freq'], fold_data['test_breath'], augment=False)
+        val_dataset = PPGRRDataset(cfg,fold_data['val_freq'], fold_data['val_rr'], fold_data['val_freq'], fold_data['val_breath'], augment=False)
+        test_dataset = PPGRRDataset(cfg,fold_data['test_freq'], fold_data['test_rr'], fold_data['test_freq'], fold_data['test_breath'], augment=False)
 
         # fold_file = f"{cfg.data_dir}/fold_{cv_split['fold_id']}.pt"
         # if cfg.training.ablation_mode == 'freq_only':
