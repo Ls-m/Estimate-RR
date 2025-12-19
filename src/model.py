@@ -21,8 +21,8 @@ from transformer import CNNTransformerRegressor
 from tcn import TCNScalogramModel
 import seaborn as sns
 import pandas as pd
-# from rwkv_freq import RWKVScalogramModel
-from rwkv_freq2 import RWKVScalogramModel
+from rwkv_freq import RWKVScalogramModel
+# from rwkv_freq2 import RWKVScalogramModel
 from mamba import MambaScalogramModel
 import itertools
 
