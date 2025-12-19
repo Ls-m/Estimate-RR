@@ -242,7 +242,27 @@ class PPGRRDataModule(LightningDataModule):
     def test_dataloader(self):
         return torch.utils.data.DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers, persistent_workers=True, worker_init_fn=worker_init_fn)
     
+class FullSSLDataModule(LightningDataModule):
+    def __init__(self, train_set, val_set, batch_size, num_workers):
+        super().__init__()
+        # 1. Merge Train and Validation completely
+        self.full_dataset = torch.utils.data.ConcatDataset([train_set, val_set])
+        self.batch_size = batch_size
+        self.num_workers = num_workers
 
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.full_dataset, 
+            batch_size=self.batch_size, 
+            shuffle=True, 
+            num_workers=self.num_workers,
+            pin_memory=True,
+            drop_last=True 
+        )
+
+    # 2. RETURN NONE for validation to disable the loop
+    def val_dataloader(self):
+        return None
 
 import pywt
 import numpy as np

@@ -1620,8 +1620,8 @@ class SSLModel(pl.LightningModule):
         if x.dim() == 3:
             x = x.unsqueeze(1)  # (B, 1, F, T)
 
-        x_corrupt = self.augment(x)
-        x_hat = self(x_corrupt)
+        # x_corrupt = self.augment(x)
+        x_hat = self(x)
 
         loss = self.loss_fn(x_hat, x)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch,spectrogram, find_peaks
 from sklearn.preprocessing import StandardScaler
 from scipy.interpolate import interp1d
-from dataset import PPGRRDataset, PPGRRDataModule
+from dataset import PPGRRDataset, PPGRRDataModule, FullSSLDataModule
 from model import RRLightningModule, SSLPretrainModule
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
@@ -2850,7 +2850,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
                 # ssl_model = SSLModel(
                 #     encoder=encoder
                 # )
-                ssl_model = SSLJigsawModel(
+                ssl_model = SSLModel(
                     encoder=encoder
                 )
                 pretrained_path = f"fold_{fold_id}_ssl_encoder.pth"
@@ -2862,38 +2862,66 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
                 version=f'fold_{cv_split["fold_id"]}_ssl_{cfg.training.ablation_mode}'
             )
 
+            # ssl_checkpoint_callback = ModelCheckpoint(
+            #     monitor='val_acc',
+            #     dirpath=ssl_logger.log_dir,
+            #     filename='ssl-best-checkpoint',
+            #     save_top_k=1,
+            #     mode='max'
+            # )
+
+            # Change your checkpoint callback to this:
             ssl_checkpoint_callback = ModelCheckpoint(
-                monitor='val_acc',
                 dirpath=ssl_logger.log_dir,
-                filename='ssl-best-checkpoint',
-                save_top_k=1,
-                mode='max'
+                # Disable monitoring specific metrics
+                monitor=None, 
+                save_top_k=0,      # Don't save "best" k models based on metrics
+                save_last=True,    # ALWAYS save the model at the very end (last.ckpt)
+            )
+            my_ssl_data_module = FullSSLDataModule(
+                train_dataset, 
+                val_dataset, 
+                batch_size=cfg.training.batch_size, 
+                num_workers=cfg.hardware.num_workers
             )
             
+            # ssl_trainer = pl.Trainer(
+            #     max_epochs=cfg.ssl.max_epochs,
+            #     accelerator="auto",
+            #     strategy='ddp_find_unused_parameters_true',
+            #     devices=cfg.hardware.devices,
+            #     logger=ssl_logger,
+            #     log_every_n_steps=1,
+            #     callbacks=[ssl_checkpoint_callback, TQDMProgressBar(leave=True)]
+            # )
+
+            # Trainer setup (limit_val_batches=0 ensures validation is skipped)
             ssl_trainer = pl.Trainer(
                 max_epochs=cfg.ssl.max_epochs,
                 accelerator="auto",
                 strategy='ddp_find_unused_parameters_true',
                 devices=cfg.hardware.devices,
                 logger=ssl_logger,
-                log_every_n_steps=1,
-                callbacks=[ssl_checkpoint_callback, TQDMProgressBar(leave=True)]
+                callbacks=[ssl_checkpoint_callback, TQDMProgressBar(leave=True)],
+                limit_val_batches=0, # Explicitly disable validation loop
+                num_sanity_val_steps=0 # Disable the pre-training sanity check
             )
-
-            ssl_trainer.fit(ssl_model, datamodule=data_module)
+            ssl_trainer.fit(ssl_model, datamodule=my_ssl_data_module)
             
             # Load best and save encoder weights
             best_ssl_model_path = ssl_checkpoint_callback.best_model_path
             
+            last_model_path = os.path.join(ssl_logger.log_dir, "last.ckpt")
             if cfg.training.ablation_mode == "time_only":
                 best_model = SSLModel.load_from_checkpoint(best_ssl_model_path)
             else: 
-                best_model = SSLJigsawModel.load_from_checkpoint(best_ssl_model_path)
+                best_model = SSLModel.load_from_checkpoint(last_model_path)
 
             if not dist.is_initialized() or dist.get_rank() == 0:
                 # Both modules have self.encoder, so this line works for both
                 torch.save(best_model.encoder.state_dict(), pretrained_path)
-                logger.info(f"Saved best pre-trained encoder to {pretrained_path}")
+                # logger.info(f"Saved best pre-trained encoder to {pretrained_path}")
+                logger.info(f"Saved LAST (fully trained) encoder to {pretrained_path}")
 
             if dist.is_initialized():
                 dist.barrier()
