@@ -3078,11 +3078,11 @@ def main(cfg: DictConfig):
     # exit()
     print(raw_data.keys())
     print(len(raw_data.keys()))
-    # processed_data = process_data(cfg, raw_data)
+    processed_data = process_data(cfg, raw_data)
 
 
-    # print(f"processed data length: {len(processed_data)}")
-    # print(f"processed data for subjects")
+    print(f"processed data length: {len(processed_data)}")
+    print(f"processed data for subjects")
     
     processed_data_capnobase = None
     if cfg.training.use_capno:
@@ -3268,7 +3268,7 @@ def main(cfg: DictConfig):
     print(f"✅ Subjects covered in test sets: {len(all_test_subjects)}")
     print(f"🧩 Missing subjects in test folds: {missing_subjects if missing_subjects else 'None'}")
     print(f"⚠️ Unexpected subjects: {extra_subjects if extra_subjects else 'None'}")
-    processed_data = None
+    # processed_data = None
     all_fold_results = train(cfg, cv_splits, processed_data_capnobase, processed_capnobase_ssl, processed_data)
     
     for fold_result in all_fold_results:
