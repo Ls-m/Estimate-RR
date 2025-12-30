@@ -1377,7 +1377,10 @@ class RRLightningModule(pl.LightningModule):
     #     # Clear outputs
     #     self.validation_step_outputs.clear()
 
-    
+    def on_test_epoch_start(self):
+        self.test_preds = []
+        self.test_targets = []
+
     def test_step(self, batch, batch_idx):
         ppg, rr, freq, breath = batch
         bs = ppg.shape[0]
@@ -1388,19 +1391,90 @@ class RRLightningModule(pl.LightningModule):
 
 
         self.log('test_loss', loss, on_step=True, on_epoch=True, sync_dist=True)
+        self.test_preds.append(rr_pred.detach().cpu())
+        self.test_targets.append(breath.detach().cpu())
         # metrics = self.test_metrics(rr_pred, rr)
         metrics = self.test_metrics(rr_pred, breath)
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True, batch_size=bs, sync_dist=True)
-        # self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        # # Store outputs for epoch-end calculations
-        # self.test_step_outputs.append({
-        #     'test_loss': loss.detach().cpu(),
-        #     'pred': rr_pred.detach().cpu(),
-        #     'target': rr.detach().cpu()
-        # })
+        
         
         return loss
-    
+    def on_test_epoch_end(self):
+        preds = torch.cat(self.test_preds)
+        targets = torch.cat(self.test_targets)
+
+        if torch.std(preds) > 0 and torch.std(targets) > 0:
+            pcc = torchmetrics.functional.pearson_corrcoef(preds, targets)
+        else:
+            pcc = torch.tensor(float("nan"))
+
+        self.log("test/PCC", pcc, on_epoch=True, prog_bar=True, sync_dist=True)
+        if not self.trainer.is_global_zero:
+            return
+
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        import pandas as pd
+        import numpy as np
+
+        preds = torch.cat(self.test_preds).numpy().flatten()
+        targets = torch.cat(self.test_targets).numpy().flatten()
+
+        errors = preds - targets
+        abs_errors = np.abs(errors)
+
+        # --- 1. Regression Plot ---
+        fig1, ax1 = plt.subplots(figsize=(6, 6))
+        ax1.scatter(targets, preds, alpha=0.3)
+        lims = [min(targets.min(), preds.min()), max(targets.max(), preds.max())]
+        ax1.plot(lims, lims, 'r--')
+        ax1.set_xlabel("True RR (bpm)")
+        ax1.set_ylabel("Predicted RR (bpm)")
+        ax1.set_title("Test Set: Predicted vs True RR")
+
+        # --- 2. Bland–Altman Plot ---
+        means = (targets + preds) / 2
+        diffs = preds - targets
+        mean_diff = np.mean(diffs)
+        std_diff = np.std(diffs)
+
+        fig2, ax2 = plt.subplots(figsize=(8, 4))
+        ax2.scatter(means, diffs, alpha=0.3)
+        ax2.axhline(mean_diff, color='red', linestyle='--',
+                    label=f'Mean Bias = {mean_diff:.2f}')
+        ax2.axhline(mean_diff + 1.96*std_diff, color='gray', linestyle='--')
+        ax2.axhline(mean_diff - 1.96*std_diff, color='gray', linestyle='--')
+        ax2.set_xlabel("Mean RR (Pred, True)")
+        ax2.set_ylabel("Difference (Pred − True)")
+        ax2.set_title("Test Set: Bland–Altman Plot")
+        ax2.legend()
+
+        # --- 3. Error by RR Bin ---
+        df = pd.DataFrame({
+            'RR': targets,
+            'AbsError': abs_errors
+        })
+
+        bins = [0, 10, 15, 20, 25, 100]
+        labels = ['<10', '10–15', '15–20', '20–25', '>25']
+        df['RR_bin'] = pd.cut(df['RR'], bins=bins, labels=labels)
+
+        fig3, ax3 = plt.subplots(figsize=(8, 4))
+        sns.barplot(data=df, x='RR_bin', y='AbsError', ax=ax3)
+        ax3.set_xlabel("Respiratory Rate Range (bpm)")
+        ax3.set_ylabel("MAE (bpm)")
+        ax3.set_title("Test Set: MAE by RR Range")
+
+        # --- Logging ---
+        if hasattr(self.logger, "experiment"):
+            tb = self.logger.experiment
+            tb.add_figure("Test/Regression", fig1, 0)
+            tb.add_figure("Test/BlandAltman", fig2, 0)
+            tb.add_figure("Test/ErrorByBin", fig3, 0)
+
+        plt.close('all')
     # def on_test_epoch_end(self):
     #     if not self.test_step_outputs:
     #         return
