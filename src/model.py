@@ -1408,7 +1408,7 @@ class RRLightningModule(pl.LightningModule):
         else:
             pcc = torch.tensor(float("nan"))
 
-        self.log("test/PCC", pcc, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("test/PCC", pcc, on_epoch=True, prog_bar=True, sync_dist=False)
         if not self.trainer.is_global_zero:
             return
 
