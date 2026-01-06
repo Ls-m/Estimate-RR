@@ -3056,7 +3056,7 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
                              profiler=profiler,
                              benchmark=False
                              )
-        ckpt_dir = Path(f"freqonly_v149/fold_{fold_id}/checkpoints")
+        ckpt_dir = Path(f"logs/freqonly_v149/fold_{fold_id}/checkpoints")
 
         ckpt_files = list(ckpt_dir.glob(f"best-checkpoint-fold{fold_id}-*.ckpt"))
 
