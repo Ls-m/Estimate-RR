@@ -51,6 +51,7 @@ from scipy.signal import resample_poly
 from rwkv_freq import CNNRWKV
 from model import SSLModel, SSLJigsawModel
 from dataset import PPGRRDatasetFromDisk
+from pathlib import Path
 logger = logging.getLogger("ReadData")
 
 def set_seed(seed):
@@ -3304,7 +3305,7 @@ def main(cfg: DictConfig):
     print(f"✅ Subjects covered in test sets: {len(all_test_subjects)}")
     print(f"🧩 Missing subjects in test folds: {missing_subjects if missing_subjects else 'None'}")
     print(f"⚠️ Unexpected subjects: {extra_subjects if extra_subjects else 'None'}")
-    processed_data = None
+    # processed_data = None
     all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_data_capnobase)
     
     for fold_result in all_fold_results:
