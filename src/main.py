@@ -331,6 +331,7 @@ def check_bandpass_filter_effect(original_signal, filtered_signal, original_rate
     plt.colorbar(label='dB')
     plt.tight_layout()
     plt.show()
+    plt.savefig("figure.png")
     # Numeric metrics: power in passband vs out-of-band
     # Compute PSD from Welch arrays
     # Note: f_orig == f_filt
@@ -1555,6 +1556,7 @@ def check_freq_features(freq_segments, rr_segments, subject_id):
     plt.xlabel("Frequency bin")
     plt.ylabel("Normalized PSD")
     plt.show()
+    plt.savefig("rr.png")
 
 # --- NEW WAVELET DENOISING FUNCTION ---
 def denoise_ppg_with_wavelet(ppg_signal, wavelet='sym8', level=5):
@@ -1750,6 +1752,7 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
             ppg_filtered = ppg_denoised
 
         # check_bandpass_filter_effect(ppg_denoised, ppg_filtered, original_rate, cfg.preprocessing.bandpass_filter.low_freq, cfg.preprocessing.bandpass_filter.high_freq)
+      
         if cfg.preprocessing.remove_outliers:
             ppg_cliped,lower_band, higher_band = remove_outliers(ppg_filtered)
             # check_outliers_removal_effect(ppg_filtered, ppg_cliped, original_rate, lower_band, higher_band)
@@ -1791,7 +1794,28 @@ def process_data(cfg, raw_data, dataset_name='bidmc'):
         freq_segments = compute_freq_features(ppg_segments, original_rate, n_jobs=n_jobs)
         # freq_segments = compute_freq_features(ppg_segments, original_rate)
         # check_freq_features(freq_segments, rr_segments, subject_id)
-  
+        # pick one segment
+        # segment = ppg_segments[55]
+
+        # compute scalogram
+        # scalogram = generate_cwt_scalogram(segment, fs=original_rate)
+
+        # plot
+        # plt.figure(figsize=(6, 4))
+        # plt.imshow(
+        #     scalogram,
+        #     aspect='auto',
+        #     origin='lower',
+        #     cmap='viridis'
+        # )
+        # plt.colorbar(label='Normalized CWT magnitude')
+        # plt.xlabel('Time (seconds)')
+        # plt.ylabel('Frequency bins')
+        # plt.title('CWT Scalogram')
+        # plt.tight_layout()
+        # plt.show()
+        # plt.savefig("mm.png")
+        # exit()
 
         logger.info(f"compute frequency segments with gpu")
         # freq_segments = compute_freq_features_gpu(
@@ -3031,14 +3055,26 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
                              profiler=profiler,
                              benchmark=False
                              )
-        model = RRLightningModule(cfg)
+        ckpt_dir = Path(f"freqonly_v149/fold_{fold_id}/checkpoints")
+
+        ckpt_files = list(ckpt_dir.glob(f"best-checkpoint-fold{fold_id}-*.ckpt"))
+
+        assert len(ckpt_files) == 1, f"Expected 1 best checkpoint, found {len(ckpt_files)}"
+
+        ckpt_path = ckpt_files[0]
+
+        model = RRLightningModule.load_from_checkpoint(
+            ckpt_path,
+            cfg=cfg
+        )
+        # model = RRLightningModule(cfg)
         
-        fine_tune_trainer.fit(model, data_module)
+        # fine_tune_trainer.fit(model, data_module)
         # Write profiler summary to file
-        os.makedirs("profiles", exist_ok=True)
-        summary = profiler.summary()
-        with open("profiles/profiler_summary.txt", "w") as f:
-            f.write(summary)
+        # os.makedirs("profiles", exist_ok=True)
+        # summary = profiler.summary()
+        # with open("profiles/profiler_summary.txt", "w") as f:
+        #     f.write(summary)
         test_reults = fine_tune_trainer.test(model, datamodule=data_module, ckpt_path="best")
         all_fold_results.append({
             "fold_id": fold_id,
@@ -3078,11 +3114,11 @@ def main(cfg: DictConfig):
     # exit()
     print(raw_data.keys())
     print(len(raw_data.keys()))
-    # processed_data = process_data(cfg, raw_data)
+    processed_data = process_data(cfg, raw_data)
 
 
-    # print(f"processed data length: {len(processed_data)}")
-    # print(f"processed data for subjects")
+    print(f"processed data length: {len(processed_data)}")
+    print(f"processed data for subjects")
     
     processed_data_capnobase = None
     if cfg.training.use_capno:
@@ -3248,7 +3284,7 @@ def main(cfg: DictConfig):
 
 
     # cv_splits = create_balanced_folds(processed_data, n_splits=5)
-    cv_splits = create_folds(processed_data_capnobase, n_splits=5)
+    cv_splits = create_folds(processed_data, n_splits=5)
     logger.info(f"Created folds: {cv_splits}")
 
 
@@ -3258,7 +3294,7 @@ def main(cfg: DictConfig):
         all_test_subjects.update(fold["test_subjects"])
 
     # Collect all subjects in the dataset
-    all_subjects = set(processed_data_capnobase.keys())
+    all_subjects = set(processed_data.keys())
 
     # Check coverage
     missing_subjects = all_subjects - all_test_subjects
@@ -3269,7 +3305,7 @@ def main(cfg: DictConfig):
     print(f"🧩 Missing subjects in test folds: {missing_subjects if missing_subjects else 'None'}")
     print(f"⚠️ Unexpected subjects: {extra_subjects if extra_subjects else 'None'}")
     processed_data = None
-    all_fold_results = train(cfg, cv_splits, processed_data_capnobase, processed_capnobase_ssl, processed_data)
+    all_fold_results = train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_data_capnobase)
     
     for fold_result in all_fold_results:
         logger.info(f"Fold {fold_result['fold_id']} test results: {fold_result['test_results']}")
