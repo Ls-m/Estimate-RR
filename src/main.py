@@ -3076,7 +3076,8 @@ def train(cfg, cv_splits, processed_data, processed_capnobase_ssl, processed_dat
         # summary = profiler.summary()
         # with open("profiles/profiler_summary.txt", "w") as f:
         #     f.write(summary)
-        test_reults = fine_tune_trainer.test(model, datamodule=data_module, ckpt_path="best")
+        # test_reults = fine_tune_trainer.test(model, datamodule=data_module, ckpt_path="best")
+        test_reults = fine_tune_trainer.test(model, datamodule=data_module)
         all_fold_results.append({
             "fold_id": fold_id,
             "test_results": test_reults[0]
